@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VM Manager Pro - Interface Web</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Chart.js pour les graphiques -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖥️ THOTH CLOUD</h1>
+            <p>Gestion avancée de machines virtuelles KVM/libvirt</p>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <span class="stat-label">VMs Actives</span>
+                    <span class="stat-value" id="running-count">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">VMs Total</span>
+                    <span class="stat-value" id="total-count">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tabs Navigation -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('vms')">🖥️ Machines Virtuelles</button>
+            <button class="tab-btn" onclick="switchTab('deploy')">🚀 Déployer une VM</button>
+            <button class="tab-btn" onclick="switchTab('monitoring')">📊 Monitoring</button>
+            <button class="tab-btn" onclick="switchTab('system')">⚙️ Système</button>
+        </div>
+
+        <!-- Tab: VMs List -->
+        <div id="tab-vms" class="tab-content active">
+            <section class="card">
+                <div class="card-header">
+                    <h2>📋 Machines Virtuelles</h2>
+                    <button onclick="loadVMs()" class="btn btn-primary">🔄 Actualiser</button>
+                </div>
+                <div id="vms-list" class="vms-grid">
+                    <p class="loading">Chargement...</p>
+                </div>
+            </section>
+
+            <!-- VM Details -->
+            <section id="vm-details" class="card" style="display: none;">
+                <div class="card-header">
+                    <h2 id="vm-name-title">Détails VM</h2>
+                    <button onclick="closeDetails()" class="btn btn-secondary">✖ Fermer</button>
+                </div>
+                
+                <!-- Actions VM -->
+                <div class="vm-actions">
+                    <button onclick="startVM()" class="btn btn-success">▶️ Démarrer</button>
+                    <button onclick="shutdownVM()" class="btn btn-warning">⏹️ Arrêter</button>
+                    <button onclick="rebootVM()" class="btn btn-info">🔄 Redémarrer</button>
+                    <button onclick="pauseVM()" class="btn btn-warning">⏸️ Pause</button>
+                    <button onclick="resumeVM()" class="btn btn-success">▶️ Reprendre</button>
+                    <button onclick="destroyVM()" class="btn btn-danger">🛑 Forcer</button>
+                    <button onclick="showCloneModal()" class="btn btn-info">📋 Cloner</button>
+                    <button onclick="showConsoleModal()" class="btn btn-primary">🖥️ Console</button>
+                </div>
+
+                <!-- Stats en temps réel -->
+                <div id="vm-stats" class="stats-container" style="display: none;">
+                    <div class="stat-card">
+                        <div class="stat-icon">🖥️</div>
+                        <div class="stat-info">
+                            <div class="stat-label">CPU Usage</div>
+                            <div class="stat-value" id="cpu-usage">0%</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💾</div>
+                        <div class="stat-info">
+                            <div class="stat-label">Memory</div>
+                            <div class="stat-value" id="memory-usage">0 MB / 0 MB</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💿</div>
+                        <div class="stat-info">
+                            <div class="stat-label">Disk I/O</div>
+                            <div class="stat-value" id="disk-io">R: 0 MB | W: 0 MB</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🌐</div>
+                        <div class="stat-info">
+                            <div class="stat-label">Network</div>
+                            <div class="stat-value" id="network-io">RX: 0 MB | TX: 0 MB</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Infos VM -->
+                <div id="vm-info" class="vm-info">
+                    <p class="loading">Chargement des informations...</p>
+                </div>
+
+                <!-- Snapshots -->
+                <div class="snapshots-section">
+                    <div class="section-header">
+                        <h3>📸 Snapshots</h3>
+                        <button onclick="showSnapshotModal()" class="btn btn-primary">+ Créer</button>
+                    </div>
+                    <div id="snapshots-list" class="snapshots-grid">
+                        <p class="loading">Chargement des snapshots...</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Tab: Deploy VM -->
+        <div id="tab-deploy" class="tab-content">
+            <section class="card">
+                <div class="card-header">
+                    <h2>🚀 Déployer une Nouvelle VM</h2>
+                </div>
+                
+                <form id="deploy-form" onsubmit="deployVM(event)" class="deploy-form">
+                    <div class="form-section">
+                        <h3>📝 Configuration Générale</h3>
+                        
+                        <div class="form-group">
+                            <label for="vm-hostname">Hostname de la VM *</label>
+                            <input type="text" id="vm-hostname" required placeholder="ex: web-server-01">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vm-memory">RAM (Mo) *</label>
+                                <input type="number" id="vm-memory" required value="2048" min="512" step="512">
+                            </div>
+                            <div class="form-group">
+                                <label for="vm-vcpus">CPU (vCPUs) *</label>
+                                <input type="number" id="vm-vcpus" required value="2" min="1" max="8">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vm-disk">Stockage (Go) *</label>
+                            <input type="number" id="vm-disk" required value="20" min="10" max="500">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vm-os-variant">Type d'OS *</label>
+                            <select id="vm-os-variant" required>
+                                <option value="ubuntu22.04">Ubuntu 22.04 LTS</option>
+                                <option value="ubuntu20.04">Ubuntu 20.04 LTS</option>
+                                <option value="debian11">Debian 11</option>
+                                <option value="debian12">Debian 12</option>
+                                <option value="centos8">CentOS 8</option>
+                                <option value="fedora38">Fedora 38</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vm-iso-path">Chemin de l'ISO *</label>
+                            <input type="text" id="vm-iso-path" required placeholder="/var/lib/libvirt/images/ubuntu-22.04-server.iso">
+                            <small>Chemin complet vers l'image ISO sur le serveur</small>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>👤 Configuration Utilisateur</h3>
+                        
+                        <div class="form-group">
+                            <label for="vm-username">Nom d'utilisateur *</label>
+                            <input type="text" id="vm-username" required placeholder="ex: admin">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Méthode d'authentification *</label>
+                            <div class="radio-group">
+                                <label>
+                                    <input type="radio" name="auth-method" value="password" checked onchange="toggleAuthMethod()">
+                                    Mot de passe
+                                </label>
+                                <label>
+                                    <input type="radio" name="auth-method" value="ssh-key" onchange="toggleAuthMethod()">
+                                    Clé SSH
+                                </label>
+                            </div>
+                        </div>
+
+                        <div id="password-section" class="form-group">
+                            <label for="vm-password">Mot de passe *</label>
+                            <input type="password" id="vm-password" placeholder="Mot de passe sécurisé">
+                            <small>⚠️ L'utilisateur devra changer ce mot de passe à la première connexion</small>
+                        </div>
+
+                        <div id="ssh-key-section" class="form-group" style="display: none;">
+                            <label for="vm-ssh-key">Clé SSH publique *</label>
+                            <textarea id="vm-ssh-key" rows="4" placeholder="ssh-rsa AAAAB3NzaC1yc2EA..."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>🌐 Configuration Réseau</h3>
+                        
+                        <div class="form-group">
+                            <label for="vm-network">Interface réseau *</label>
+                            <select id="vm-network" required>
+                                <option value="default">default (NAT)</option>
+                                <option value="bridge=virbr0">Bridge virbr0</option>
+                                <option value="bridge=br0">Bridge br0</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="vm-dhcp" checked>
+                                Utiliser DHCP (configuration automatique)
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="info-box">
+                        <h4>ℹ️ À propos du déploiement</h4>
+                        <ul>
+                            <li>✅ La VM sera créée avec cloud-init pour la configuration automatique</li>
+                            <li>✅ Le backend attend que la VM démarre complètement</li>
+                            <li>✅ L'adresse IP sera récupérée et affichée automatiquement</li>
+                            <li>⏱️ Le processus peut prendre quelques minutes</li>
+                        </ul>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn-success btn-lg">🚀 Déployer la VM</button>
+                        <button type="reset" class="btn btn-secondary">🔄 Réinitialiser</button>
+                    </div>
+                </form>
+
+                <!-- Deployment Progress -->
+                <div id="deployment-progress" class="deployment-progress" style="display: none;">
+                    <div class="progress-header">
+                        <h3>🚀 Déploiement en cours...</h3>
+                    </div>
+                    <div class="progress-steps">
+                        <div class="progress-step" id="step-1">
+                            <div class="step-icon">⏳</div>
+                            <div class="step-text">Génération du cloud-init...</div>
+                        </div>
+                        <div class="progress-step" id="step-2">
+                            <div class="step-icon">⏳</div>
+                            <div class="step-text">Création de la VM...</div>
+                        </div>
+                        <div class="progress-step" id="step-3">
+                            <div class="step-icon">⏳</div>
+                            <div class="step-text">Démarrage de la VM...</div>
+                        </div>
+                        <div class="progress-step" id="step-4">
+                            <div class="step-icon">⏳</div>
+                            <div class="step-text">Attente de l'initialisation...</div>
+                        </div>
+                        <div class="progress-step" id="step-5">
+                            <div class="step-icon">⏳</div>
+                            <div class="step-text">Récupération de l'adresse IP...</div>
+                        </div>
+                    </div>
+                    <div id="deployment-result" class="deployment-result" style="display: none;">
+                        <div class="result-success">
+                            <h3>✅ VM déployée avec succès !</h3>
+                            <div class="result-info">
+                                <p><strong>Hostname:</strong> <span id="result-hostname"></span></p>
+                                <p><strong>Adresse IP:</strong> <span id="result-ip" class="highlight-ip"></span></p>
+                                <p><strong>Utilisateur:</strong> <span id="result-username"></span></p>
+                                <p><strong>Connexion SSH:</strong></p>
+                                <code id="ssh-command"></code>
+                                <button onclick="copySshCommand()" class="btn btn-primary btn-sm">📋 Copier la commande</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Tab: Monitoring -->
+        <div id="tab-monitoring" class="tab-content">
+            <section class="card">
+                <div class="card-header">
+                    <h2>📊 Monitoring en Temps Réel</h2>
+                    <button onclick="toggleMonitoring()" class="btn btn-primary" id="monitoring-toggle">▶️ Démarrer</button>
+                </div>
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <h3>CPU Usage</h3>
+                        <canvas id="cpu-chart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Memory Usage</h3>
+                        <canvas id="memory-chart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Disk I/O</h3>
+                        <canvas id="disk-chart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Network I/O</h3>
+                        <canvas id="network-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Tab: System Info -->
+        <div id="tab-system" class="tab-content">
+            <section class="card">
+                <div class="card-header">
+                    <h2>⚙️ Informations Système</h2>
+                    <button onclick="loadSystemInfo()" class="btn btn-primary">🔄 Actualiser</button>
+                </div>
+                <div id="system-info" class="vm-info">
+                    <p class="loading">Chargement...</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- Modal: Console VNC -->
+        <div id="console-modal" class="modal modal-large">
+            <div class="modal-content modal-large-content">
+                <div class="modal-header">
+                    <h3>🖥️ Console VM</h3>
+                    <button onclick="closeConsoleModal()" class="close-btn">✖</button>
+                </div>
+                <div class="console-info">
+                    <p>⚠️ La console VNC nécessite noVNC ou un client VNC configuré.</p>
+                    <p id="vnc-info">Chargement...</p>
+                    <div class="vnc-commands">
+                        <h4>Connexion via client VNC:</h4>
+                        <code id="vnc-command"></code>
+                        <button onclick="copyVNCCommand()" class="btn btn-primary btn-sm">📋 Copier</button>
+                    </div>
+                </div>
+                <div id="console-frame" class="console-frame">
+                    <p class="console-placeholder">
+                        Pour activer la console intégrée, installez noVNC:<br>
+                        <code>sudo apt install novnc</code><br>
+                        <code>sudo websockify -D --web=/usr/share/novnc/ 6080 localhost:5900</code>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Créer un snapshot -->
+        <div id="snapshot-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>📸 Créer un Snapshot</h3>
+                    <button onclick="closeSnapshotModal()" class="close-btn">✖</button>
+                </div>
+                <form onsubmit="createSnapshot(event)">
+                    <div class="form-group">
+                        <label>Nom du snapshot:</label>
+                        <input type="text" id="snapshot-name" required placeholder="avant-apache">
+                    </div>
+                    <div class="form-group">
+                        <label>Description (optionnel):</label>
+                        <textarea id="snapshot-description" placeholder="VM avant installation Apache"></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn-success">Créer</button>
+                        <button type="button" onclick="closeSnapshotModal()" class="btn btn-secondary">Annuler</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal: Cloner VM -->
+        <div id="clone-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>📋 Cloner la VM</h3>
+                    <button onclick="closeCloneModal()" class="close-btn">✖</button>
+                </div>
+                <form onsubmit="cloneVM(event)">
+                    <div class="form-group">
+                        <label>Nom du clone:</label>
+                        <input type="text" id="clone-name" required placeholder="vm-cloud-4107-clone">
+                    </div>
+                    <div class="info-box">
+                        <h4>⚠️ Après le clonage, modifiez:</h4>
+                        <ul>
+                            <li>✅ MAC Address (automatique)</li>
+                            <li>🔧 Hostname</li>
+                            <li>🔑 SSH host keys</li>
+                            <li>🆔 machine-id</li>
+                            <li>🌐 IP statique (si configurée)</li>
+                        </ul>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn-success">Cloner</button>
+                        <button type="button" onclick="closeCloneModal()" class="btn btn-secondary">Annuler</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Toast notifications -->
+        <div id="toast" class="toast"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

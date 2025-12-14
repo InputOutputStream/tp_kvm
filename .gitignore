@@ -1,6 +1,21 @@
 # Prerequisites
 *.d
 
+iso/
+
+interface_web/package-lock.json
+
+
+interface_web/node_modules
+
+interface_web/back/dependencies/
+
+
+interface_web/back/cpp-httplib/
+
+interface_web/back/build/
+interface_web/back/json/
+
 # Compiled Object files
 *.slo
 *.lo
