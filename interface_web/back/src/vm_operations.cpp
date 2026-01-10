@@ -264,20 +264,21 @@ bool VMOperations::deployVM(const json& vmParams) {
         int memory = vmParams["memory"];  // in MB
         int vcpus = vmParams["vcpus"];
         int disk = vmParams["disk"];  // in GB
+        std::string isoPath = vmParams.value("isoPath", "");
         
         std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
         
         // Get the default storage pool
         virStoragePoolPtr pool = virStoragePoolLookupByName(conn, "default");
         if (!pool) {
-            fprintf(stderr,"Failed to find default storage pool\n");
+            fprintf(stderr, "Failed to find default storage pool\n");
             return false;
         }
         
         // Make sure pool is active
         if (virStoragePoolIsActive(pool) != 1) {
             if (virStoragePoolCreate(pool, 0) < 0) {
-                fprintf(stderr, "Failed to activate storage pool\n");
+                fprintf(stderr, "Failed to activate storage pool \n");
                 virStoragePoolFree(pool);
                 return false;
             }
@@ -301,7 +302,7 @@ bool VMOperations::deployVM(const json& vmParams) {
         if (!vol) {
             virErrorPtr err = virGetLastError();
             if (err) {
-                fprintf(stderr, "Failed to create storage volume: %s", err->message);
+                fprintf(stderr, "Failed to create storage volume: %s\n", err->message);
             }
             virStoragePoolFree(pool);
             return false;
@@ -317,7 +318,8 @@ bool VMOperations::deployVM(const json& vmParams) {
         virStorageVolFree(vol);
         virStoragePoolFree(pool);
         
-        fprintf(stderr, "Created disk image: %s", diskPath.c_str());
+        fprintf(stderr, "Created disk image: %s\n", diskPath.c_str());
+          
         // Create domain XML configuration
         std::stringstream xmlConfig;
         xmlConfig << "<domain type='kvm'>"
@@ -327,7 +329,8 @@ bool VMOperations::deployVM(const json& vmParams) {
                   << "  <vcpu placement='static'>" << vcpus << "</vcpu>"
                   << "  <os>"
                   << "    <type arch='x86_64' machine='pc'>hvm</type>"
-                  << "    <boot dev='hd'/>"
+                  << "    <boot dev='cdrom'/>"  // Boot from CDROM first
+                  << "    <boot dev='hd'/>"      // Then from hard disk
                   << "  </os>"
                   << "  <features>"
                   << "    <acpi/>"
@@ -344,8 +347,18 @@ bool VMOperations::deployVM(const json& vmParams) {
                   << "      <driver name='qemu' type='qcow2'/>"
                   << "      <source file='" << diskPath << "'/>"
                   << "      <target dev='vda' bus='virtio'/>"
-                  << "    </disk>"
-                  << "    <interface type='network'>"
+                  << "    </disk>";
+        
+        if (!isoPath.empty()) {
+            xmlConfig << "    <disk type='file' device='cdrom'>"
+                      << "      <driver name='qemu' type='raw'/>"
+                      << "      <source file='" << isoPath << "'/>"
+                      << "      <target dev='hdc' bus='ide'/>"
+                      << "      <readonly/>"
+                      << "    </disk>";
+        }
+        
+        xmlConfig << "    <interface type='network'>"
                   << "      <source network='default'/>"
                   << "      <model type='virtio'/>"
                   << "    </interface>"
@@ -358,12 +371,14 @@ bool VMOperations::deployVM(const json& vmParams) {
         
         std::string xml = xmlConfig.str();
         
+        fprintf(stderr, "Creating VM with XML configuration...\n");
+        
         // Define the domain
         virDomainPtr domain = virDomainDefineXML(conn, xml.c_str());
         if (!domain) {
             virErrorPtr err = virGetLastError();
             if (err) {
-                fprintf(stderr, "Failed to define domain: %s", err->message);
+                fprintf(stderr, "Failed to define domain: %s\n", err->message);
             }
             return false;
         }
@@ -372,22 +387,159 @@ bool VMOperations::deployVM(const json& vmParams) {
         if (virDomainCreate(domain) < 0) {
             virErrorPtr err = virGetLastError();
             if (err) {
-                fprintf(stderr, "Failed to start domain: %s", err->message);
+                fprintf(stderr, "Failed to start domain: %s\n", err->message);
             }
             virDomainFree(domain);
             return false;
         }
-        fprintf(stderr, "VM %s", hostname.c_str());
+        
+        fprintf(stderr, "VM %s", hostname );
         fprintf(stderr, " deployed and started successfully \n");
         
         virDomainFree(domain);
         return true;
         
     } catch (const std::exception& e) {
-        fprintf(stderr, "Exception in deployVM: %s", e.what());
+        fprintf(stderr, "Exception in deployVM: %s \n", e.what());
         return false;
     }
 }
+
+// bool VMOperations::deployVM(const json& vmParams) {
+//     if (!conn) {
+//         return false;
+//     }
+
+//     try {
+//         // Extract parameters
+//         std::string hostname = vmParams["hostname"];
+//         int memory = vmParams["memory"];  // in MB
+//         int vcpus = vmParams["vcpus"];
+//         int disk = vmParams["disk"];  // in GB
+        
+//         std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
+        
+//         // Get the default storage pool
+//         virStoragePoolPtr pool = virStoragePoolLookupByName(conn, "default");
+//         if (!pool) {
+//             fprintf(stderr,"Failed to find default storage pool\n");
+//             return false;
+//         }
+        
+//         // Make sure pool is active
+//         if (virStoragePoolIsActive(pool) != 1) {
+//             if (virStoragePoolCreate(pool, 0) < 0) {
+//                 fprintf(stderr, "Failed to activate storage pool\n");
+//                 virStoragePoolFree(pool);
+//                 return false;
+//             }
+//         }
+        
+//         // Create storage volume XML
+//         std::stringstream volXml;
+//         volXml << "<volume>"
+//                << "  <name>" << hostname << ".qcow2</name>"
+//                << "  <capacity unit='G'>" << disk << "</capacity>"
+//                << "  <target>"
+//                << "    <format type='qcow2'/>"
+//                << "    <permissions>"
+//                << "      <mode>0644</mode>"
+//                << "    </permissions>"
+//                << "  </target>"
+//                << "</volume>";
+        
+//         // Create the volume
+//         virStorageVolPtr vol = virStorageVolCreateXML(pool, volXml.str().c_str(), 0);
+//         if (!vol) {
+//             virErrorPtr err = virGetLastError();
+//             if (err) {
+//                 fprintf(stderr, "Failed to create storage volume: %s", err->message);
+//             }
+//             virStoragePoolFree(pool);
+//             return false;
+//         }
+        
+//         // Get the actual path of the created volume
+//         char* path = virStorageVolGetPath(vol);
+//         if (path) {
+//             diskPath = path;
+//             free(path);
+//         }
+        
+//         virStorageVolFree(vol);
+//         virStoragePoolFree(pool);
+        
+//         fprintf(stderr, "Created disk image: %s", diskPath.c_str());
+//         // Create domain XML configuration
+//         std::stringstream xmlConfig;
+//         xmlConfig << "<domain type='kvm'>"
+//                   << "  <name>" << hostname << "</name>"
+//                   << "  <memory unit='MiB'>" << memory << "</memory>"
+//                   << "  <currentMemory unit='MiB'>" << memory << "</currentMemory>"
+//                   << "  <vcpu placement='static'>" << vcpus << "</vcpu>"
+//                   << "  <os>"
+//                   << "    <type arch='x86_64' machine='pc'>hvm</type>"
+//                   << "    <boot dev='hd'/>"
+//                   << "  </os>"
+//                   << "  <features>"
+//                   << "    <acpi/>"
+//                   << "    <apic/>"
+//                   << "  </features>"
+//                   << "  <cpu mode='host-passthrough'/>"
+//                   << "  <clock offset='utc'/>"
+//                   << "  <on_poweroff>destroy</on_poweroff>"
+//                   << "  <on_reboot>restart</on_reboot>"
+//                   << "  <on_crash>destroy</on_crash>"
+//                   << "  <devices>"
+//                   << "    <emulator>/usr/bin/qemu-system-x86_64</emulator>"
+//                   << "    <disk type='file' device='disk'>"
+//                   << "      <driver name='qemu' type='qcow2'/>"
+//                   << "      <source file='" << diskPath << "'/>"
+//                   << "      <target dev='vda' bus='virtio'/>"
+//                   << "    </disk>"
+//                   << "    <interface type='network'>"
+//                   << "      <source network='default'/>"
+//                   << "      <model type='virtio'/>"
+//                   << "    </interface>"
+//                   << "    <console type='pty'>"
+//                   << "      <target type='serial' port='0'/>"
+//                   << "    </console>"
+//                   << "    <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'/>"
+//                   << "  </devices>"
+//                   << "</domain>";
+        
+//         std::string xml = xmlConfig.str();
+        
+//         // Define the domain
+//         virDomainPtr domain = virDomainDefineXML(conn, xml.c_str());
+//         if (!domain) {
+//             virErrorPtr err = virGetLastError();
+//             if (err) {
+//                 fprintf(stderr, "Failed to define domain: %s", err->message);
+//             }
+//             return false;
+//         }
+        
+//         // Start the VM
+//         if (virDomainCreate(domain) < 0) {
+//             virErrorPtr err = virGetLastError();
+//             if (err) {
+//                 fprintf(stderr, "Failed to start domain: %s", err->message);
+//             }
+//             virDomainFree(domain);
+//             return false;
+//         }
+//         fprintf(stderr, "VM %s", hostname.c_str());
+//         fprintf(stderr, " deployed and started successfully \n");
+        
+//         virDomainFree(domain);
+//         return true;
+        
+//     } catch (const std::exception& e) {
+//         fprintf(stderr, "Exception in deployVM: %s", e.what());
+//         return false;
+//     }
+// }
 
 
 bool VMOperations::destroyVM(const std::string& name) {
