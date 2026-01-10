@@ -58,6 +58,10 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Post(R"(/api/vms/([^/]+)/resume)", [this](const httplib::Request& req, httplib::Response& res) {
         this->handleResumeVM(req, res);
     });
+
+    svr.Delete(R"(/api/vms/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleDeleteVM(req, res);
+    });
     
     // VNC
     svr.Get(R"(/api/vms/([^/]+)/vnc)", [this](const httplib::Request& req, httplib::Response& res) {
@@ -151,6 +155,36 @@ void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& re
     };
     
     res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& res) {
+    std::string name = req.matches[1];
+    
+    // Get query parameter for disk removal
+    bool removeDisks = false;
+    if (req.has_param("removeDisks")) {
+        std::string removeDiskParam = req.get_param_value("removeDisks");
+        removeDisks = (removeDiskParam == "true" || removeDiskParam == "1");
+    }
+    
+    std::cerr << "Delete VM request: " << name 
+              << " (removeDisks: " << (removeDisks ? "true" : "false") << ")" << std::endl;
+    
+    json result = vmOps->deleteVM(name, removeDisks);
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 500;
+        
+        // Check if it's a "not found" error
+        if (result.contains("error")) {
+            std::string error = result["error"];
+            if (error.find("not found") != std::string::npos) {
+                res.status = 404;
+            }
+        }
+    }
+    
+    res.set_content(result.dump(2), "application/json");
 }
 
 void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {
