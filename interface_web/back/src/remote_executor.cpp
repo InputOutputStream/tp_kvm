@@ -2,6 +2,8 @@
 #include "../include/utils.hpp"
 #include <sstream>
 #include <regex>
+#include <unistd.h>
+#include <sys/stat.h>
 
 namespace RemoteExec {
 
@@ -21,16 +23,48 @@ RemoteExecutor::RemoteExecutor(virConnectPtr connection) : conn(connection) {
             isRemote = true;
             
             // Extract user and host from URI
-            // Format: qemu+ssh://user@host/system
-            std::regex uriRegex(R"(qemu\+ssh://([^@]+)@([^/]+)/system)");
+            // Format: qemu+ssh://user@host/system or qemu+ssh://user@host/system?keyfile=/path
+            std::regex uriRegex(R"(qemu\+ssh://([^@]+)@([^/?]+))");
             std::smatch matches;
             
             if (std::regex_search(uriStr, matches, uriRegex)) {
                 remoteUser = matches[1].str();
                 remoteHost = matches[2].str();
             }
+            
+            // Extract SSH key file if specified in URI
+            std::regex keyRegex(R"(keyfile=([^&]+))");
+            if (std::regex_search(uriStr, matches, keyRegex)) {
+                sshKeyFile = matches[1].str();
+            } else {
+                // Try to find default SSH key
+                sshKeyFile = findDefaultSSHKey();
+            }
         }
     }
+}
+
+std::string RemoteExecutor::findDefaultSSHKey() const {
+    // Check common SSH key locations
+    const char* home = getenv("HOME");
+    if (!home) {
+        return "";
+    }
+    
+    std::vector<std::string> possibleKeys = {
+        std::string(home) + "/.ssh/thoth_kvm_key",
+        std::string(home) + "/.ssh/id_rsa",
+        std::string(home) + "/.ssh/id_ed25519",
+    };
+    
+    for (const auto& keyPath : possibleKeys) {
+        struct stat buffer;
+        if (stat(keyPath.c_str(), &buffer) == 0) {
+            return keyPath;
+        }
+    }
+    
+    return "";
 }
 
 std::string RemoteExecutor::buildSSHCommand(const std::string& command) const {
@@ -38,9 +72,22 @@ std::string RemoteExecutor::buildSSHCommand(const std::string& command) const {
         return command;
     }
     
-    // Build SSH command with proper escaping
+    // Build SSH command with proper escaping and key authentication
     std::stringstream ssh;
-    ssh << "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ";
+    ssh << "ssh ";
+    
+    // Add SSH key if available
+    if (!sshKeyFile.empty()) {
+        ssh << "-i " << sshKeyFile << " ";
+    }
+    
+    // SSH options for non-interactive use
+    ssh << "-o StrictHostKeyChecking=no ";
+    ssh << "-o UserKnownHostsFile=/dev/null ";
+    ssh << "-o ConnectTimeout=10 ";
+    ssh << "-o BatchMode=yes ";  // Fail if password is required
+    ssh << "-o PasswordAuthentication=no ";  // Don't ask for password
+    
     ssh << remoteUser << "@" << remoteHost << " ";
     ssh << "'" << command << "'";
     
@@ -117,9 +164,19 @@ bool RemoteExecutor::isValidDiskImage(const std::string& imagePath) const {
 
 std::string RemoteExecutor::getHostInfo() const {
     if (isRemote) {
-        return remoteUser + "@" + remoteHost + " (remote)";
+        std::string keyInfo = sshKeyFile.empty() ? " [NO KEY]" : " [key: " + sshKeyFile + "]";
+        return remoteUser + "@" + remoteHost + " (remote)" + keyInfo;
     }
     return "localhost (local)";
+}
+
+bool RemoteExecutor::testConnection() const {
+    if (!isRemote) {
+        return true;
+    }
+    
+    auto result = execute("echo 'connection_test'");
+    return result.success() && result.output.find("connection_test") != std::string::npos;
 }
 
 } // namespace RemoteExec

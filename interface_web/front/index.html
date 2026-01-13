@@ -3,407 +3,745 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VM Manager Pro - Interface Web</title>
-    <link rel="stylesheet" href="style.css">
-    <!-- Chart.js pour les graphiques -->
+    <title>THOTH CLOUD - Plateforme de Gestion VM</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/sidebar.css">
+    <link rel="stylesheet" href="styles/cards.css">
+    <link rel="stylesheet" href="styles/forms.css">
+    <link rel="stylesheet" href="styles/modals.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🖥️ THOTH CLOUD</h1>
-            <p>Gestion avancée de machines virtuelles KVM/libvirt</p>
-            <div class="header-stats">
-                <div class="stat-item">
-                    <span class="stat-label">VMs Actives</span>
-                    <span class="stat-value" id="running-count">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">VMs Total</span>
-                    <span class="stat-value" id="total-count">0</span>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">🌍</div>
+                <div class="logo-text">
+                    <h1>THOTH</h1>
+                    <p>Cloud Platform</p>
                 </div>
             </div>
-        </header>
-
-        <!-- Tabs Navigation -->
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('vms')">🖥️ Machines Virtuelles</button>
-            <button class="tab-btn" onclick="switchTab('deploy')">🚀 Déployer une VM</button>
-            <button class="tab-btn" onclick="switchTab('monitoring')">📊 Monitoring</button>
-            <button class="tab-btn" onclick="switchTab('system')">⚙️ Système</button>
+            <button class="sidebar-toggle" id="sidebar-toggle">
+                <span>☰</span>
+            </button>
         </div>
 
-        <!-- Tab: VMs List -->
-        <div id="tab-vms" class="tab-content active">
-            <section class="card">
-                <div class="card-header">
-                    <h2>📋 Machines Virtuelles</h2>
-                    <button onclick="loadVMs()" class="btn btn-primary">🔄 Actualiser</button>
-                </div>
-                <div id="vms-list" class="vms-grid">
-                    <p class="loading">Chargement...</p>
-                </div>
-            </section>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <h3 class="nav-section-title">MENU</h3>
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-view="vms">
+                    <span class="nav-icon">🖥️</span>
+                    <span class="nav-text">Virtual Machines</span>
+                    <span class="nav-badge" id="vm-count-badge">0</span>
+                </a>
+                <a href="#" class="nav-item" data-view="deploy">
+                    <span class="nav-icon">🚀</span>
+                    <span class="nav-text">Deploy VM</span>
+                </a>
+                <a href="#" class="nav-item" data-view="paas">
+                    <span class="nav-icon">📦</span>
+                    <span class="nav-text">PaaS Applications</span>
+                </a>
+                <a href="#" class="nav-item" data-view="swarm">
+                    <span class="nav-icon">🐳</span>
+                    <span class="nav-text">Docker Swarm</span>
+                </a>
+            </div>
 
-            <!-- VM Details -->
-            <section id="vm-details" class="card" style="display: none;">
-                <div class="card-header">
-                    <h2 id="vm-name-title">Détails VM</h2>
-                    <button onclick="closeDetails()" class="btn btn-secondary">✖ Fermer</button>
-                </div>
-                
-                <!-- Actions VM -->
-                <div class="vm-actions">
-                    <button onclick="startVM()" class="btn btn-success">▶️ Démarrer</button>
-                    <button onclick="shutdownVM()" class="btn btn-warning">⏹️ Arrêter</button>
-                    <button onclick="rebootVM()" class="btn btn-info">🔄 Redémarrer</button>
-                    <button onclick="pauseVM()" class="btn btn-warning">⏸️ Pause</button>
-                    <button onclick="resumeVM()" class="btn btn-success">▶️ Reprendre</button>
-                    <button onclick="destroyVM()" class="btn btn-danger">🛑 Forcer</button>
-                    <button onclick="showCloneModal()" class="btn btn-info">📋 Cloner</button>
-                    <button onclick="showConsoleModal()" class="btn btn-primary">🖥️ Console</button>
-                </div>
+            <div class="nav-section">
+                <h3 class="nav-section-title">ADMINISTRATION</h3>
+                <a href="#" class="nav-item" data-view="users">
+                    <span class="nav-icon">👥</span>
+                    <span class="nav-text">Users & Quotas</span>
+                </a>
+                <a href="#" class="nav-item" data-view="billing">
+                    <span class="nav-icon">💰</span>
+                    <span class="nav-text">Billing</span>
+                </a>
+                <a href="#" class="nav-item" data-view="monitoring">
+                    <span class="nav-icon">📈</span>
+                    <span class="nav-text">Monitoring</span>
+                </a>
+                <a href="#" class="nav-item" data-view="system">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">System Info</span>
+                </a>
+            </div>
+        </nav>
 
-                <!-- Stats en temps réel -->
-                <div id="vm-stats" class="stats-container" style="display: none;">
-                    <div class="stat-card">
-                        <div class="stat-icon">🖥️</div>
-                        <div class="stat-info">
-                            <div class="stat-label">CPU Usage</div>
-                            <div class="stat-value" id="cpu-usage">0%</div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">💾</div>
-                        <div class="stat-info">
-                            <div class="stat-label">Memory</div>
-                            <div class="stat-value" id="memory-usage">0 MB / 0 MB</div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">💿</div>
-                        <div class="stat-info">
-                            <div class="stat-label">Disk I/O</div>
-                            <div class="stat-value" id="disk-io">R: 0 MB | W: 0 MB</div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">🌐</div>
-                        <div class="stat-info">
-                            <div class="stat-label">Network</div>
-                            <div class="stat-value" id="network-io">RX: 0 MB | TX: 0 MB</div>
-                        </div>
-                    </div>
+        <div class="sidebar-footer">
+            <div class="user-profile">
+                <div class="user-avatar">👤</div>
+                <div class="user-info">
+                    <p class="user-name">Admin User</p>
+                    <p class="user-role">Administrator</p>
                 </div>
+            </div>
+        </div>
+    </aside>
 
-                <!-- Infos VM -->
-                <div id="vm-info" class="vm-info">
-                    <p class="loading">Chargement des informations...</p>
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Dashboard View -->
+        <div id="view-dashboard" class="view active">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Dashboard Overview</h2>
+                    <p class="page-subtitle">Gestion Avancée de Machines Virtuelles KVM/libvirt</p>
                 </div>
+                <div class="page-actions">
+                    <button class="btn btn-secondary" onclick="loadVMs()">
+                        <span>🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
 
-                <!-- Snapshots -->
-                <div class="snapshots-section">
-                    <div class="section-header">
-                        <h3>📸 Snapshots</h3>
-                        <button onclick="showSnapshotModal()" class="btn btn-primary">+ Créer</button>
-                    </div>
-                    <div id="snapshots-list" class="snapshots-grid">
-                        <p class="loading">Chargement des snapshots...</p>
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card stat-card-primary">
+                    <div class="stat-icon">🟢</div>
+                    <div class="stat-content">
+                        <p class="stat-label">VMs Actives</p>
+                        <h3 class="stat-value" id="running-count">0</h3>
                     </div>
                 </div>
-            </section>
+                <div class="stat-card stat-card-info">
+                    <div class="stat-icon">💻</div>
+                    <div class="stat-content">
+                        <p class="stat-label">Total VMs</p>
+                        <h3 class="stat-value" id="total-count">0</h3>
+                    </div>
+                </div>
+                <div class="stat-card stat-card-success">
+                    <div class="stat-icon">⚡</div>
+                    <div class="stat-content">
+                        <p class="stat-label">Performance</p>
+                        <h3 class="stat-value">Optimale</h3>
+                    </div>
+                </div>
+                <div class="stat-card stat-card-warning">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-content">
+                        <p class="stat-label">Coût Mensuel</p>
+                        <h3 class="stat-value">$245.80</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="content-section">
+                <h3 class="section-title">Quick Actions</h3>
+                <div class="quick-actions-grid">
+                    <button class="action-card" onclick="switchView('deploy')">
+                        <span class="action-icon">🚀</span>
+                        <h4>Deploy New VM</h4>
+                        <p>Create a new virtual machine</p>
+                    </button>
+                    <button class="action-card" onclick="switchView('swarm')">
+                        <span class="action-icon">🐳</span>
+                        <h4>Deploy Swarm Cluster</h4>
+                        <p>Setup Docker Swarm</p>
+                    </button>
+                    <button class="action-card" onclick="switchView('paas')">
+                        <span class="action-icon">📦</span>
+                        <h4>Deploy Application</h4>
+                        <p>From PaaS catalog</p>
+                    </button>
+                    <button class="action-card" onclick="switchView('monitoring')">
+                        <span class="action-icon">📊</span>
+                        <h4>View Monitoring</h4>
+                        <p>Real-time metrics</p>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recent VMs -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3 class="section-title">Recent Virtual Machines</h3>
+                    <button class="btn btn-text" onclick="switchView('vms')">View All →</button>
+                </div>
+                <div id="dashboard-vms-list" class="vm-cards-grid">
+                    <p class="loading-text">Loading virtual machines...</p>
+                </div>
+            </div>
         </div>
 
-        <!-- Tab: Deploy VM -->
-        <div id="tab-deploy" class="tab-content">
-            <section class="card">
-                <div class="card-header">
-                    <h2>🚀 Déployer une Nouvelle VM</h2>
+        <!-- VMs List View -->
+        <div id="view-vms" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Virtual Machines</h2>
+                    <p class="page-subtitle">Manage your virtual machines</p>
                 </div>
-                
-                <form id="deploy-form" onsubmit="deployVM(event)" class="deploy-form">
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="switchView('deploy')">
+                        <span>➕</span>
+                        New VM
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadVMs()">
+                        <span>🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters-bar">
+                <input type="text" class="search-input" placeholder="🔍 Search VMs..." id="vm-search">
+                <div class="filter-chips">
+                    <button class="chip active" data-filter="all">All</button>
+                    <button class="chip" data-filter="running">🟢 Running</button>
+                    <button class="chip" data-filter="stopped">🔴 Stopped</button>
+                    <button class="chip" data-filter="paused">🟡 Paused</button>
+                </div>
+            </div>
+
+            <div id="vms-list" class="vm-cards-grid">
+                <p class="loading-text">Loading virtual machines...</p>
+            </div>
+        </div>
+
+        <!-- Deploy VM View -->
+        <div id="view-deploy" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Deploy New Virtual Machine</h2>
+                    <p class="page-subtitle">Configure and deploy a new VM instance</p>
+                </div>
+            </div>
+
+            <form id="deploy-form" onsubmit="deployVM(event)" class="form-container">
+                <div class="form-grid">
+                    <!-- General Configuration -->
                     <div class="form-section">
-                        <h3>📝 Configuration Générale</h3>
+                        <h3 class="form-section-title">General Configuration</h3>
                         
                         <div class="form-group">
-                            <label for="vm-hostname">Hostname de la VM *</label>
-                            <input type="text" id="vm-hostname" required placeholder="ex: web-server-01">
+                            <label>VM Hostname *</label>
+                            <input type="text" id="vm-hostname" required placeholder="web-server-01">
                         </div>
 
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="vm-memory">RAM (Mo) *</label>
-                                <input type="number" id="vm-memory" required value="2048" min="512" step="512">
-                            </div>
-                            <div class="form-group">
-                                <label for="vm-vcpus">CPU (vCPUs) *</label>
-                                <input type="number" id="vm-vcpus" required value="2" min="1" max="8">
+                        <div class="form-group">
+                            <label>Select Flavor *</label>
+                            <div class="flavor-cards">
+                                <label class="flavor-card">
+                                    <input type="radio" name="flavor" value="small" required>
+                                    <div class="flavor-content">
+                                        <h4>Small</h4>
+                                        <p class="flavor-specs">1 vCPU • 2 GB RAM • 15 GB Disk</p>
+                                        <p class="flavor-price">2,500 FCFA/month</p>
+                                    </div>
+                                </label>
+                                <label class="flavor-card">
+                                    <input type="radio" name="flavor" value="medium" checked>
+                                    <div class="flavor-content">
+                                        <h4>Medium</h4>
+                                        <p class="flavor-specs">2 vCPU • 4 GB RAM • 20 GB Disk</p>
+                                        <p class="flavor-price">3,500 FCFA/month</p>
+                                    </div>
+                                </label>
+                                <label class="flavor-card">
+                                    <input type="radio" name="flavor" value="large">
+                                    <div class="flavor-content">
+                                        <h4>Large</h4>
+                                        <p class="flavor-specs">4 vCPU • 8 GB RAM • 40 GB Disk</p>
+                                        <p class="flavor-price">6,500 FCFA/month</p>
+                                    </div>
+                                </label>
                             </div>
                         </div>
 
                         <div class="form-group">
-                            <label for="vm-disk">Stockage (Go) *</label>
-                            <input type="number" id="vm-disk" required value="20" min="10" max="500">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="vm-os-variant">Type d'OS *</label>
-                            <select id="vm-os-variant" required>
-                                <option value="ubuntu22.04">Ubuntu 22.04 LTS</option>
-                                <option value="ubuntu20.04">Ubuntu 20.04 LTS</option>
-                                <option value="debian11">Debian 11</option>
-                                <option value="debian12">Debian 12</option>
-                                <option value="centos8">CentOS 8</option>
-                                <option value="fedora38">Fedora 38</option>
+                            <label>Network Isolation *</label>
+                            <select id="vm-network" required>
+                                <option value="user-default">User Default Network</option>
+                                <option value="swarm-cluster">Swarm Cluster Network</option>
+                                <option value="custom">Custom Network</option>
                             </select>
                         </div>
-
-                        <div class="form-group">
-                            <label for="vm-iso-path">Chemin de l'ISO *</label>
-                            <input type="text" id="vm-iso-path" required placeholder="/var/lib/libvirt/images/ubuntu-22.04-server.iso">
-                            <small>Chemin complet vers l'image ISO sur le serveur</small>
-                        </div>
                     </div>
 
+                    <!-- User Configuration -->
                     <div class="form-section">
-                        <h3>👤 Configuration Utilisateur</h3>
+                        <h3 class="form-section-title">User Configuration</h3>
                         
                         <div class="form-group">
-                            <label for="vm-username">Nom d'utilisateur *</label>
-                            <input type="text" id="vm-username" required placeholder="ex: admin">
+                            <label>Username *</label>
+                            <input type="text" id="vm-username" required value="ubuntu" placeholder="ubuntu">
                         </div>
 
                         <div class="form-group">
-                            <label>Méthode d'authentification *</label>
+                            <label>Authentication Method *</label>
                             <div class="radio-group">
-                                <label>
+                                <label class="radio-option">
                                     <input type="radio" name="auth-method" value="password" checked onchange="toggleAuthMethod()">
-                                    Mot de passe
+                                    <span>Password</span>
                                 </label>
-                                <label>
+                                <label class="radio-option">
                                     <input type="radio" name="auth-method" value="ssh-key" onchange="toggleAuthMethod()">
-                                    Clé SSH
+                                    <span>SSH Key</span>
                                 </label>
                             </div>
                         </div>
 
                         <div id="password-section" class="form-group">
-                            <label for="vm-password">Mot de passe *</label>
-                            <input type="password" id="vm-password" placeholder="Mot de passe sécurisé">
-                            <small>⚠️ L'utilisateur devra changer ce mot de passe à la première connexion</small>
+                            <label>Password *</label>
+                            <input type="password" id="vm-password" placeholder="Secure password">
                         </div>
 
                         <div id="ssh-key-section" class="form-group" style="display: none;">
-                            <label for="vm-ssh-key">Clé SSH publique *</label>
+                            <label>SSH Public Key *</label>
                             <textarea id="vm-ssh-key" rows="4" placeholder="ssh-rsa AAAAB3NzaC1yc2EA..."></textarea>
                         </div>
                     </div>
+                </div>
 
-                    <div class="form-section">
-                        <h3>🌐 Configuration Réseau</h3>
-                        
-                        <div class="form-group">
-                            <label for="vm-network">Interface réseau *</label>
-                            <select id="vm-network" required>
-                                <option value="default">default (NAT)</option>
-                                <option value="bridge=virbr0">Bridge virbr0</option>
-                                <option value="bridge=br0">Bridge br0</option>
-                            </select>
-                        </div>
+                <div class="info-banner">
+                    <span class="info-icon">ℹ️</span>
+                    <div>
+                        <h4>Automated Deployment with Cloud-Init</h4>
+                        <p>Ubuntu 22.04 Cloud Image • Automatic configuration • QEMU Guest Agent • Ready in 1-2 minutes</p>
+                    </div>
+                </div>
 
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="vm-dhcp" checked>
-                                Utiliser DHCP (configuration automatique)
-                            </label>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <span>🚀</span>
+                        Deploy VM
+                    </button>
+                    <button type="reset" class="btn btn-secondary">
+                        <span>🔄</span>
+                        Reset
+                    </button>
+                </div>
+            </form>
+
+            <!-- Deployment Progress -->
+            <div id="deployment-progress" class="deployment-progress" style="display: none;">
+                <div class="progress-header">
+                    <h3>🚀 Deployment in Progress...</h3>
+                    <p>Please wait while we create your virtual machine</p>
+                </div>
+                <div class="progress-steps">
+                    <div class="progress-step" id="step-1">
+                        <div class="step-indicator">1</div>
+                        <div class="step-content">
+                            <span class="step-icon">⏳</span>
+                            <span>Generating cloud-init...</span>
                         </div>
                     </div>
-
-                    <div class="info-box">
-                        <h4>ℹ️ À propos du déploiement</h4>
-                        <ul>
-                            <li>✅ La VM sera créée avec cloud-init pour la configuration automatique</li>
-                            <li>✅ Le backend attend que la VM démarre complètement</li>
-                            <li>✅ L'adresse IP sera récupérée et affichée automatiquement</li>
-                            <li>⏱️ Le processus peut prendre quelques minutes</li>
-                        </ul>
-                    </div>
-
-                    <div class="modal-actions">
-                        <button type="submit" class="btn btn-success btn-lg">🚀 Déployer la VM</button>
-                        <button type="reset" class="btn btn-secondary">🔄 Réinitialiser</button>
-                    </div>
-                </form>
-
-                <!-- Deployment Progress -->
-                <div id="deployment-progress" class="deployment-progress" style="display: none;">
-                    <div class="progress-header">
-                        <h3>🚀 Déploiement en cours...</h3>
-                    </div>
-                    <div class="progress-steps">
-                        <div class="progress-step" id="step-1">
-                            <div class="step-icon">⏳</div>
-                            <div class="step-text">Génération du cloud-init...</div>
-                        </div>
-                        <div class="progress-step" id="step-2">
-                            <div class="step-icon">⏳</div>
-                            <div class="step-text">Création de la VM...</div>
-                        </div>
-                        <div class="progress-step" id="step-3">
-                            <div class="step-icon">⏳</div>
-                            <div class="step-text">Démarrage de la VM...</div>
-                        </div>
-                        <div class="progress-step" id="step-4">
-                            <div class="step-icon">⏳</div>
-                            <div class="step-text">Attente de l'initialisation...</div>
-                        </div>
-                        <div class="progress-step" id="step-5">
-                            <div class="step-icon">⏳</div>
-                            <div class="step-text">Récupération de l'adresse IP...</div>
+                    <div class="progress-step" id="step-2">
+                        <div class="step-indicator">2</div>
+                        <div class="step-content">
+                            <span class="step-icon">⏳</span>
+                            <span>Creating VM...</span>
                         </div>
                     </div>
-                    <div id="deployment-result" class="deployment-result" style="display: none;">
-                        <div class="result-success">
-                            <h3>✅ VM déployée avec succès !</h3>
-                            <div class="result-info">
-                                <p><strong>Hostname:</strong> <span id="result-hostname"></span></p>
-                                <p><strong>Adresse IP:</strong> <span id="result-ip" class="highlight-ip"></span></p>
-                                <p><strong>Utilisateur:</strong> <span id="result-username"></span></p>
-                                <p><strong>Connexion SSH:</strong></p>
+                    <div class="progress-step" id="step-3">
+                        <div class="step-indicator">3</div>
+                        <div class="step-content">
+                            <span class="step-icon">⏳</span>
+                            <span>Starting VM...</span>
+                        </div>
+                    </div>
+                    <div class="progress-step" id="step-4">
+                        <div class="step-indicator">4</div>
+                        <div class="step-content">
+                            <span class="step-icon">⏳</span>
+                            <span>System initialization...</span>
+                        </div>
+                    </div>
+                    <div class="progress-step" id="step-5">
+                        <div class="step-indicator">5</div>
+                        <div class="step-content">
+                            <span class="step-icon">⏳</span>
+                            <span>Retrieving IP address...</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="deployment-result" class="deployment-result" style="display: none;">
+                    <div class="result-success">
+                        <span class="result-icon">✅</span>
+                        <h3>VM Deployed Successfully!</h3>
+                        <div class="result-details">
+                            <div class="result-item">
+                                <span>Hostname:</span>
+                                <strong id="result-hostname"></strong>
+                            </div>
+                            <div class="result-item">
+                                <span>IP Address:</span>
+                                <strong id="result-ip"></strong>
+                            </div>
+                            <div class="result-item">
+                                <span>Username:</span>
+                                <strong id="result-username"></strong>
+                            </div>
+                            <div class="ssh-command">
+                                <p>SSH Connection:</p>
                                 <code id="ssh-command"></code>
-                                <button onclick="copySshCommand()" class="btn btn-primary btn-sm">📋 Copier la commande</button>
+                                <button onclick="copySshCommand()" class="btn btn-sm btn-secondary">
+                                    <span>📋</span>
+                                    Copy
+                                </button>
                             </div>
                         </div>
                     </div>
                 </div>
-            </section>
-        </div>
-
-        <!-- Tab: Monitoring -->
-        <div id="tab-monitoring" class="tab-content">
-            <section class="card">
-                <div class="card-header">
-                    <h2>📊 Monitoring en Temps Réel</h2>
-                    <button onclick="toggleMonitoring()" class="btn btn-primary" id="monitoring-toggle">▶️ Démarrer</button>
-                </div>
-                <div class="charts-grid">
-                    <div class="chart-container">
-                        <h3>CPU Usage</h3>
-                        <canvas id="cpu-chart"></canvas>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Memory Usage</h3>
-                        <canvas id="memory-chart"></canvas>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Disk I/O</h3>
-                        <canvas id="disk-chart"></canvas>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Network I/O</h3>
-                        <canvas id="network-chart"></canvas>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- Tab: System Info -->
-        <div id="tab-system" class="tab-content">
-            <section class="card">
-                <div class="card-header">
-                    <h2>⚙️ Informations Système</h2>
-                    <button onclick="loadSystemInfo()" class="btn btn-primary">🔄 Actualiser</button>
-                </div>
-                <div id="system-info" class="vm-info">
-                    <p class="loading">Chargement...</p>
-                </div>
-            </section>
-        </div>
-
-        <!-- Modal: Console VNC -->
-        <div id="console-modal" class="modal modal-large">
-            <div class="modal-content modal-large-content">
-                <div class="modal-header">
-                    <h3>🖥️ Console VM</h3>
-                    <button onclick="closeConsoleModal()" class="close-btn">✖</button>
-                </div>
-                <div class="console-info">
-                    <p>⚠️ La console VNC nécessite noVNC ou un client VNC configuré.</p>
-                    <p id="vnc-info">Chargement...</p>
-                    <div class="vnc-commands">
-                        <h4>Connexion via client VNC:</h4>
-                        <code id="vnc-command"></code>
-                        <button onclick="copyVNCCommand()" class="btn btn-primary btn-sm">📋 Copier</button>
-                    </div>
-                </div>
-                <div id="console-frame" class="console-frame">
-                    <p class="console-placeholder">
-                        Pour activer la console intégrée, installez noVNC:<br>
-                        <code>sudo apt install novnc</code><br>
-                        <code>sudo websockify -D --web=/usr/share/novnc/ 6080 localhost:5900</code>
-                    </p>
-                </div>
             </div>
         </div>
 
-        <!-- Modal: Créer un snapshot -->
-        <div id="snapshot-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>📸 Créer un Snapshot</h3>
-                    <button onclick="closeSnapshotModal()" class="close-btn">✖</button>
+        <!-- PaaS Applications View -->
+        <div id="view-paas" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>PaaS Application Catalog</h2>
+                    <p class="page-subtitle">Deploy applications with one click</p>
                 </div>
-                <form onsubmit="createSnapshot(event)">
-                    <div class="form-group">
-                        <label>Nom du snapshot:</label>
-                        <input type="text" id="snapshot-name" required placeholder="avant-apache">
+                <div class="page-actions">
+                    <button class="btn btn-secondary" onclick="refreshApps()">
+                        <span>🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters-bar">
+                <input type="text" class="search-input" placeholder="🔍 Search applications..." id="app-search">
+                <div class="filter-chips">
+                    <button class="chip active" data-category="all">All</button>
+                    <button class="chip" data-category="web">🌐 Web</button>
+                    <button class="chip" data-category="database">🗄️ Database</button>
+                    <button class="chip" data-category="monitoring">📊 Monitoring</button>
+                    <button class="chip" data-category="development">💻 Development</button>
+                    <button class="chip" data-category="collaboration">🤝 Collaboration</button>
+                </div>
+            </div>
+
+            <div id="apps-grid" class="apps-grid">
+                <!-- Apps will be loaded dynamically -->
+            </div>
+        </div>
+
+        <!-- Docker Swarm View -->
+        <div id="view-swarm" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Docker Swarm Clusters</h2>
+                    <p class="page-subtitle">Manage your container orchestration</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="showCreateSwarmModal()">
+                        <span>➕</span>
+                        New Cluster
+                    </button>
+                </div>
+            </div>
+
+            <div class="swarm-config-card">
+                <h3>Create New Swarm Cluster</h3>
+                <form class="swarm-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Manager Nodes (impair) *</label>
+                            <input type="number" min="1" step="2" value="1" placeholder="1, 3, 5...">
+                        </div>
+                        <div class="form-group">
+                            <label>Worker Nodes *</label>
+                            <input type="number" min="0" value="2" placeholder="2">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Description (optionnel):</label>
-                        <textarea id="snapshot-description" placeholder="VM avant installation Apache"></textarea>
-                    </div>
-                    <div class="modal-actions">
-                        <button type="submit" class="btn btn-success">Créer</button>
-                        <button type="button" onclick="closeSnapshotModal()" class="btn btn-secondary">Annuler</button>
-                    </div>
+                    <button type="button" class="btn btn-primary" onclick="deploySwarmCluster()">
+                        <span>🚀</span>
+                        Deploy Cluster
+                    </button>
                 </form>
             </div>
-        </div>
 
-        <!-- Modal: Cloner VM -->
-        <div id="clone-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>📋 Cloner la VM</h3>
-                    <button onclick="closeCloneModal()" class="close-btn">✖</button>
+            <div class="clusters-grid">
+                <div class="cluster-card">
+                    <div class="cluster-header">
+                        <h3>🗝️ Main Cluster</h3>
+                        <span class="status-badge status-active">🟢 Active</span>
+                    </div>
+                    <div class="cluster-body">
+                        <div class="cluster-info">
+                            <div class="info-item">
+                                <span class="info-icon">👑</span>
+                                <span>Manager: node1</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-icon">⚙️</span>
+                                <span>Workers: 2 nodes</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-icon">📦</span>
+                                <span>Services: 3 active</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cluster-actions">
+                        <button class="btn btn-sm btn-secondary">Details</button>
+                        <button class="btn btn-sm btn-primary">Scale</button>
+                        <button class="btn btn-sm btn-secondary">Services</button>
+                    </div>
                 </div>
-                <form onsubmit="cloneVM(event)">
-                    <div class="form-group">
-                        <label>Nom du clone:</label>
-                        <input type="text" id="clone-name" required placeholder="vm-cloud-4107-clone">
-                    </div>
-                    <div class="info-box">
-                        <h4>⚠️ Après le clonage, modifiez:</h4>
-                        <ul>
-                            <li>✅ MAC Address (automatique)</li>
-                            <li>🔧 Hostname</li>
-                            <li>🔑 SSH host keys</li>
-                            <li>🆔 machine-id</li>
-                            <li>🌐 IP statique (si configurée)</li>
-                        </ul>
-                    </div>
-                    <div class="modal-actions">
-                        <button type="submit" class="btn btn-success">Cloner</button>
-                        <button type="button" onclick="closeCloneModal()" class="btn btn-secondary">Annuler</button>
-                    </div>
-                </form>
             </div>
         </div>
 
-        <!-- Toast notifications -->
-        <div id="toast" class="toast"></div>
+        <!-- Users & Quotas View -->
+        <div id="view-users" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Users & Quotas Management</h2>
+                    <p class="page-subtitle">Manage users and resource quotas</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="showAddUserModal()">
+                        <span>➕</span>
+                        Add User
+                    </button>
+                </div>
+            </div>
+
+            <div class="users-layout">
+                <div class="quotas-summary">
+                    <h3>Global Quotas</h3>
+                    <div class="quota-items">
+                        <div class="quota-item">
+                            <span>Total CPU:</span>
+                            <strong>32 vCPUs</strong>
+                        </div>
+                        <div class="quota-item">
+                            <span>Total RAM:</span>
+                            <strong>64 GB</strong>
+                        </div>
+                        <div class="quota-item">
+                            <span>Storage:</span>
+                            <strong>1 TB</strong>
+                        </div>
+                        <div class="quota-item">
+                            <span>Max VMs:</span>
+                            <strong>20</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="users-table-container">
+                    <h3>Active Users</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>VMs</th>
+                                <th>CPU</th>
+                                <th>RAM</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <!-- Users will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Billing View -->
+        <div id="view-billing" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Billing & Consumption</h2>
+                    <p class="page-subtitle">Monitor your cloud spending</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="generateInvoice()">
+                        <span>🧾</span>
+                        Generate Invoice
+                    </button>
+                </div>
+            </div>
+
+            <div class="billing-stats">
+                <div class="billing-card">
+                    <h4>💰 Monthly Cost</h4>
+                    <p class="billing-amount">$245.80</p>
+                </div>
+                <div class="billing-card">
+                    <h4>🖥️ Active VMs</h4>
+                    <p class="billing-amount">7 VMs</p>
+                </div>
+                <div class="billing-card">
+                    <h4>📦 PaaS Services</h4>
+                    <p class="billing-amount">3 services</p>
+                </div>
+                <div class="billing-card">
+                    <h4>💾 Storage Used</h4>
+                    <p class="billing-amount">250 GB</p>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>📈 Consumption History</h3>
+                <canvas id="consumption-chart"></canvas>
+            </div>
+
+            <div class="billing-details">
+                <h3>🧾 Cost Details</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Resource</th>
+                            <th>Quantity</th>
+                            <th>Rate</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="billing-details">
+                        <!-- Billing details will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Monitoring View -->
+        <div id="view-monitoring" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>Real-Time Monitoring</h2>
+                    <p class="page-subtitle">Monitor system performance</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="toggleMonitoring()" id="monitoring-toggle">
+                        <span>▶️</span>
+                        Start
+                    </button>
+                </div>
+            </div>
+
+            <div class="monitoring-grid">
+                <div class="chart-card">
+                    <h3>CPU Usage</h3>
+                    <canvas id="cpu-chart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Memory Usage</h3>
+                    <canvas id="memory-chart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Disk I/O</h3>
+                    <canvas id="disk-chart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Network I/O</h3>
+                    <canvas id="network-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Info View -->
+        <div id="view-system" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>System Information</h2>
+                    <p class="page-subtitle">Multi-host infrastructure details</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-secondary" onclick="loadSystemInfo()">
+                        <span>🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div class="system-info-container">
+                <pre id="system-info" class="system-info-text">Loading system information...</pre>
+            </div>
+        </div>
+    </main>
+
+    <!-- VM Details Panel -->
+    <div id="vm-details-panel" class="details-panel">
+        <div class="panel-header">
+            <h2 id="vm-panel-title">VM Details</h2>
+            <button class="btn-close" onclick="closeDetailsPanel()">✖</button>
+        </div>
+        <div class="panel-body">
+            <div class="vm-panel-actions">
+                <button onclick="startVM()" class="btn btn-sm btn-success">▶️ Start</button>
+                <button onclick="shutdownVM()" class="btn btn-sm btn-warning">⏹️ Stop</button>
+                <button onclick="rebootVM()" class="btn btn-sm btn-info">🔄 Reboot</button>
+                <button onclick="pauseVM()" class="btn btn-sm btn-warning">⏸️ Pause</button>
+                <button onclick="resumeVM()" class="btn btn-sm btn-success">▶️ Resume</button>
+                <button onclick="showCloneModal()" class="btn btn-sm btn-info">📋 Clone</button>
+                <button onclick="showConsoleModal()" class="btn btn-sm btn-primary">🖥️ Console</button>
+                <button onclick="showDeleteVMModal()" class="btn btn-sm btn-danger">🗑️ Delete</button>
+            </div>
+
+            <div id="vm-stats" class="vm-stats-grid" style="display: none;">
+                <div class="stat-item">
+                    <span class="stat-icon">💻</span>
+                    <div>
+                        <p class="stat-label">CPU Usage</p>
+                        <p class="stat-value" id="cpu-usage">0%</p>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">💾</span>
+                    <div>
+                        <p class="stat-label">Memory</p>
+                        <p class="stat-value" id="memory-usage">0 MB / 0 MB</p>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">💿</span>
+                    <div>
+                        <p class="stat-label">Disk I/O</p>
+                        <p class="stat-value" id="disk-io">R: 0 | W: 0</p>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">🌐</span>
+                    <div>
+                        <p class="stat-label">Network</p>
+                        <p class="stat-value" id="network-io">RX: 0 | TX: 0</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vm-info" class="vm-info-text">
+                <p>Loading VM information...</p>
+            </div>
+
+            <div class="snapshots-section">
+                <div class="section-header">
+                    <h3>📸 Snapshots</h3>
+                    <button onclick="showSnapshotModal()" class="btn btn-sm btn-primary">+ Create</button>
+                </div>
+                <div id="snapshots-list" class="snapshots-grid">
+                    <p>Loading snapshots...</p>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <script src="script.js"></script>
+    <!-- Toast Notifications -->
+    <div id="toast" class="toast"></div>
+
+    <script src="scripts/main.js" type="module"></script>
+    <script src="scripts/navigation.js"></script>
+    <script src="scripts/vms.js"></script>
+    <script src="scripts/deploy.js"></script>
+    <!-- <script src="scripts/monitoring.js"></script>-->
+    <script src="scripts/modals.js"></script> 
 </body>
 </html>

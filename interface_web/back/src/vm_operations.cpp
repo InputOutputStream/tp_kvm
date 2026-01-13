@@ -342,7 +342,7 @@ bool VMOperations::deployVM(const json& vmParams) {
             fprintf(stderr, "   - %s\n", dir.c_str());
         }
         fprintf(stderr, "\n💡 On the target host, run:\n");
-        fprintf(stderr, "   sudo mkdir -p /var/lib/libvirt/images/baseimage /var/lib/libvirt/images/cloud-init-iso\n");
+        fprintf(stderr, "   sudo mkdir -p /var/lib/libvirt/images/baseimg /var/lib/libvirt/images/cloud-init-iso\n");
         fprintf(stderr, "   sudo chown -R libvirt-qemu:kvm /var/lib/libvirt/images\n");
         return false;
     }
@@ -382,12 +382,12 @@ bool VMOperations::deployVM(const json& vmParams) {
     // ==========================================
     fprintf(stdout, "\n🔍 Validating base image on target host...\n");
     
-    std::string baseImagePath = "/var/lib/libvirt/images/baseimage/ubuntu-22.04-server-cloudimg-amd64.img";
+    std::string baseImagePath = "/var/lib/libvirt/images/baseimg/ubuntu-22.04-server-cloudimg-amd64.img";
     
     if (!remoteExec.fileExists(baseImagePath)) {
         fprintf(stderr, "❌ Base image not found on target host: %s\n", baseImagePath.c_str());
         fprintf(stderr, "\n📥 On the target host, download the base image:\n");
-        fprintf(stderr, "   cd /var/lib/libvirt/images/baseimage\n");
+        fprintf(stderr, "   cd /var/lib/libvirt/images/baseimg\n");
         fprintf(stderr, "   sudo wget https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img \\\n");
         fprintf(stderr, "        -O ubuntu-22.04-server-cloudimg-amd64.img\n");
         fprintf(stderr, "\nOr run the setup script on the target host:\n");
