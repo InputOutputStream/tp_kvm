@@ -1,8 +1,37 @@
 #include "../include/routes.hpp"
+#include "../include/utils.hpp"
+#include "../include/user_operations.hpp"
 #include "../include/json.hpp"
 #include <sstream>
 
 using json = nlohmann::json;
+
+
+UserContext getUserContext(const httplib::Request& req) {
+    UserContext ctx;
+    ctx.userId = req.get_header_value("X-User-ID");
+    ctx.role = req.get_header_value("X-User-Role");
+    ctx.isAdmin = (ctx.role == "admin");
+    
+    // Fallback: try to get from query params (for testing)
+    if (ctx.userId.empty() && req.has_param("user_id")) {
+        ctx.userId = req.get_param_value("user_id");
+    }
+    if (ctx.role.empty() && req.has_param("role")) {
+        ctx.role = req.get_param_value("role");
+        ctx.isAdmin = (ctx.role == "admin");
+    }
+    
+    return ctx;
+}
+
+// Check if user has access to VM
+bool checkVMAccess(const std::string& vmName, const UserContext& userCtx) {
+    if (userCtx.isAdmin) return true;
+    
+    VMNameManager manager;
+    return manager.isOwner(vmName, userCtx.userId);
+}
 
 APIRoutes::APIRoutes(VMOperations* operations, LibvirtManager* mgr) 
     : vmOps(operations), manager(mgr) {}
@@ -102,18 +131,53 @@ void APIRoutes::setup(httplib::Server& svr) {
         this->handleSystemInfo(req, res);
     });
 
-    }
+    // User management routes (admin only)
+    svr.Get("/api/users", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleListUsers(req, res);
+    });
 
-
+    svr.Post("/api/users", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleCreateUser(req, res);
+    });
+    svr.Put("/api/users/:username", [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleUpdateUser(req, res);
+        });
+    svr.Delete("/api/users/:username", [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleDeleteUser(req, res);
+        });
+    svr.Get("/api/users/:username/usage", [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleGetUserUsage(req, res);
+        });
+    svr.Put("/api/users/:username/quotas", [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleUpdateQuotas(req, res);
+        });
+}
 
 // Routes Handler definitions
 void APIRoutes::handleListVMs(const httplib::Request& req, httplib::Response& res) {
-    json result = vmOps->listAllVMs();
+    auto userCtx = getUserContext(req);
+    
+    json result;
+    if (userCtx.isAdmin) {
+        result = vmOps->listAllVMs();
+    } else {
+        result = vmOps->listUserVMs(userCtx.userId);
+    }
+    
     res.set_content(result.dump(), "application/json");
 }
 
+
 void APIRoutes::handleGetVMInfo(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     json result = vmOps->getVMInfo(name);
     
     if (!result["success"].get<bool>()) {
@@ -125,6 +189,14 @@ void APIRoutes::handleGetVMInfo(const httplib::Request& req, httplib::Response& 
 
 void APIRoutes::handleGetVMStatus(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     json result = vmOps->getVMStatus(name);
     
     if (!result["success"].get<bool>()) {
@@ -136,6 +208,15 @@ void APIRoutes::handleGetVMStatus(const httplib::Request& req, httplib::Response
 
 void APIRoutes::handleGetVMStats(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
     json result = vmOps->getVMStats(name);
     
     if (!result["success"].get<bool>()) {
@@ -147,8 +228,16 @@ void APIRoutes::handleGetVMStats(const httplib::Request& req, httplib::Response&
 
 void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
     bool success = vmOps->startVM(name);
-    
     json result = {
         {"success", success},
         {"output", success ? "Domain started" : "Failed to start domain"}
@@ -159,16 +248,20 @@ void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& re
 
 void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
     
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     // Get query parameter for disk removal
     bool removeDisks = false;
     if (req.has_param("removeDisks")) {
         std::string removeDiskParam = req.get_param_value("removeDisks");
         removeDisks = (removeDiskParam == "true" || removeDiskParam == "1");
     }
-    
-    std::cerr << "Delete VM request: " << name 
-              << " (removeDisks: " << (removeDisks ? "true" : "false") << ")" << std::endl;
     
     json result = vmOps->deleteVM(name, removeDisks);
     
@@ -187,14 +280,14 @@ void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& r
     res.set_content(result.dump(2), "application/json");
 }
 
-void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {
-    std::cerr << "Deploy request received" << std::endl;
-    std::cerr << "Request body: " << req.body << std::endl;
-    
+void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {    
     // Parse JSON body
+    auto userCtx = getUserContext(req);
+    
     json body;
     try {
         body = json::parse(req.body);
+   
     } catch (const std::exception& e) {
         std::cerr << "JSON parse error: " << e.what() << std::endl;
         res.status = 400;
@@ -206,52 +299,67 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
         return;
     }
     
-    // Validate required fields
-    if (!body.contains("hostname") || !body.contains("memory") || 
-        !body.contains("vcpus") || !body.contains("disk")) {
-        res.status = 400;
-        json error = {
-            {"success", false}, 
-            {"error", "Missing required fields: hostname, memory, vcpus, disk"}
-        };
+    // Validate user context
+    if (userCtx.userId.empty()) {
+        res.status = 401;
+        json error = {{"success", false}, {"error", "User not authenticated"}};
         res.set_content(error.dump(), "application/json");
         return;
     }
     
-    // Extract VM settings
-    std::string hostname = body["hostname"];
-    int memory = body["memory"];
-    int vcpus = body["vcpus"];
-    int disk = body["disk"];
-    std::string osVariant = body.value("osVariant", "ubuntu22.04");
-    std::string isoPath = body.value("isoPath", "");
+    // Check quotas for non-admin users
+    if (!userCtx.isAdmin) {
+        UserOperations userOps(manager->getConnection());
+        auto quotaCheck = userOps.checkUserQuota(userCtx.userId, body);
+        
+        if (!quotaCheck["allowed"].get<bool>()) {
+            res.status = 403;
+            res.set_content(quotaCheck.dump(), "application/json");
+            return;
+        }
+    }
+
+  // Add owner info
+    body["owner"] = userCtx.userId;
+    body["ownerRole"] = userCtx.role;
     
-    std::cerr << "Deploying VM: " << hostname 
-              << " (RAM: " << memory << "MB, vCPUs: " << vcpus 
-              << ", Disk: " << disk << "GB)" << std::endl;
+    // Generate internal VM name: userid__hostname__timestamp
+    VMNameManager nameManager;
+    std::string userHostname = body["hostname"];
+    std::string internalName = nameManager.createVMName(userCtx.userId, userHostname);
     
-    // Call VM operations
+    body["hostname"] = internalName;
+    body["displayName"] = userHostname;  // Keep original for reference
+    
     bool success = vmOps->deployVM(body);
     
     if (success) {
         json result = {
             {"success", true},
             {"output", "VM deployment initiated successfully"},
-            {"vmName", hostname}
+            {"vmName", internalName},
+            {"displayName", userHostname}
         };
         res.set_content(result.dump(), "application/json");
     } else {
         res.status = 500;
-        json error = {
-            {"success", false},
-            {"error", "Failed to deploy VM"}
-        };
+        json error = {{"success", false}, {"error", "Failed to deploy VM"}};
         res.set_content(error.dump(), "application/json");
     }
 }
 
+
 void APIRoutes::handleShutdownVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
     bool success = vmOps->shutdownVM(name);
     
     json result = {
@@ -264,6 +372,14 @@ void APIRoutes::handleShutdownVM(const httplib::Request& req, httplib::Response&
 
 void APIRoutes::handleDestroyVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     bool success = vmOps->destroyVM(name);
     
     json result = {
@@ -276,6 +392,14 @@ void APIRoutes::handleDestroyVM(const httplib::Request& req, httplib::Response& 
 
 void APIRoutes::handleRebootVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     bool success = vmOps->rebootVM(name);
     
     json result = {
@@ -288,6 +412,14 @@ void APIRoutes::handleRebootVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handlePauseVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     bool success = vmOps->pauseVM(name);
     
     json result = {
@@ -300,6 +432,14 @@ void APIRoutes::handlePauseVM(const httplib::Request& req, httplib::Response& re
 
 void APIRoutes::handleResumeVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     bool success = vmOps->resumeVM(name);
     
     json result = {
@@ -312,6 +452,14 @@ void APIRoutes::handleResumeVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handleGetVNC(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     json result = vmOps->getVNCInfo(name);
     res.set_content(result.dump(), "application/json");
 }
@@ -320,6 +468,16 @@ void APIRoutes::handleGetVNC(const httplib::Request& req, httplib::Response& res
 void APIRoutes::handleGetIP(const httplib::Request& req, httplib::Response& res)
 {
     std::string name = req.matches[1];
+
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
     json result = vmOps->getIP(name);
 
     if (!result["success"].get<bool>()) {
@@ -331,6 +489,15 @@ void APIRoutes::handleGetIP(const httplib::Request& req, httplib::Response& res)
 
 void APIRoutes::handleListSnapshots(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
     json result = vmOps->listSnapshots(name);
     
     if (!result["success"].get<bool>()) {
@@ -342,7 +509,15 @@ void APIRoutes::handleListSnapshots(const httplib::Request& req, httplib::Respon
 
 void APIRoutes::handleCreateSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
     
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
     json body;
     try {
         body = json::parse(req.body);
@@ -376,7 +551,14 @@ void APIRoutes::handleCreateSnapshot(const httplib::Request& req, httplib::Respo
 void APIRoutes::handleRevertSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
     std::string snapName = req.matches[2];
+    auto userCtx = getUserContext(req);
     
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     bool success = vmOps->revertSnapshot(name, snapName);
     
     json result = {
@@ -390,9 +572,16 @@ void APIRoutes::handleRevertSnapshot(const httplib::Request& req, httplib::Respo
 void APIRoutes::handleDeleteSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
     std::string snapName = req.matches[2];
+    auto userCtx = getUserContext(req);
+
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     
     bool success = vmOps->deleteSnapshot(name, snapName);
-    
     json result = {
         {"success", success},
         {"output", success ? "Snapshot deleted" : "Failed to delete snapshot"}
@@ -403,6 +592,14 @@ void APIRoutes::handleDeleteSnapshot(const httplib::Request& req, httplib::Respo
 
 void APIRoutes::handleCloneVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
+    auto userCtx = getUserContext(req);
+    
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     
     json body;
     try {
@@ -487,4 +684,25 @@ void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response&
     result["version"] = "Libvirt version: " + std::to_string(libVersion);
     
     res.set_content(result.dump(), "application/json");
+}
+
+
+void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& res){
+    
+}
+void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res){
+    
+}
+void APIRoutes::handleUpdateUser(const httplib::Request& req, httplib::Response& res){
+    
+}
+
+void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response& res){
+    
+}
+void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Response& res){
+    
+}
+void APIRoutes::handleUpdateQuotas(const httplib::Request& req, httplib::Response& res){
+
 }

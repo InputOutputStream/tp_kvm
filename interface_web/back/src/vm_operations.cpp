@@ -22,6 +22,134 @@ std::string VMOperations::getStateString(int state) {
     return "unknown";
 }
 
+
+json VMOperations::listUserVMs(const std::string& userId) {
+    json result;
+    result["success"] = false;
+    
+    if (!conn) {
+        result["error"] = "Not connected to libvirt";
+        return result;
+    }
+    
+    virDomainPtr* domains;
+    int numDomains = virConnectListAllDomains(conn, &domains, 0);
+    
+    if (numDomains < 0) {
+        result["error"] = "Error listing VMs";
+        return result;
+    }
+    
+    VMNameManager nameManager;
+    json vms = json::array();
+    
+    for (int i = 0; i < numDomains; i++) {
+        const char* name = virDomainGetName(domains[i]);
+        
+        // Check if VM belongs to user
+        if (nameManager.isOwner(name, userId)) {
+            virDomainInfo info;
+            virDomainGetInfo(domains[i], &info);
+            
+            int id = virDomainGetID(domains[i]);
+            std::string state = getStateString(info.state);
+            bool isRunning = (info.state == VIR_DOMAIN_RUNNING);
+            
+            // Parse name to get display name
+            auto nameInfo = nameManager.parseVMName(name);
+            std::string displayName = nameInfo.valid ? nameInfo.vmName : name;
+            
+            json vm = {
+                {"id", id},
+                {"name", name},  // Internal name
+                {"displayName", displayName},  // User-friendly name
+                {"state", state},
+                {"running", isRunning},
+                {"owner", userId},
+                {"stats", nullptr}
+            };
+            
+            if (isRunning) {
+                vm["stats"] = getVMStatsInternal(domains[i], name);
+            }
+            
+            vms.push_back(vm);
+        }
+        
+        virDomainFree(domains[i]);
+    }
+    
+    free(domains);
+    
+    result["success"] = true;
+    result["vms"] = vms;
+    result["count"] = vms.size();
+    
+    return result;
+}
+
+// Update listAllVMs to include owner info
+json VMOperations::listAllVMs() {
+    json result;
+    result["success"] = false;
+    
+    if (!conn) {
+        result["error"] = "Not connected to libvirt";
+        return result;
+    }
+    
+    virDomainPtr* domains;
+    int numDomains = virConnectListAllDomains(conn, &domains, 0);
+    
+    if (numDomains < 0) {
+        result["error"] = "Error listing VMs";
+        return result;
+    }
+    
+    VMNameManager nameManager;
+    json vms = json::array();
+    
+    for (int i = 0; i < numDomains; i++) {
+        const char* name = virDomainGetName(domains[i]);
+        virDomainInfo info;
+        virDomainGetInfo(domains[i], &info);
+        
+        int id = virDomainGetID(domains[i]);
+        std::string state = getStateString(info.state);
+        bool isRunning = (info.state == VIR_DOMAIN_RUNNING);
+        
+        // Parse name to extract owner and display name
+        auto nameInfo = nameManager.parseVMName(name);
+        std::string displayName = nameInfo.valid ? nameInfo.vmName : name;
+        std::string owner = nameInfo.valid ? nameInfo.username : "unknown";
+        
+        json vm = {
+            {"id", id},
+            {"name", name},  // Internal name
+            {"displayName", displayName},  // User-friendly name
+            {"owner", owner},
+            {"state", state},
+            {"running", isRunning},
+            {"stats", nullptr}
+        };
+        
+        if (isRunning) {
+            vm["stats"] = getVMStatsInternal(domains[i], name);
+        }
+        
+        vms.push_back(vm);
+        virDomainFree(domains[i]);
+    }
+    
+    free(domains);
+    
+    result["success"] = true;
+    result["vms"] = vms;
+    result["totalCount"] = vms.size();
+    
+    return result;
+}
+
 json VMOperations::getVMStatsInternal(virDomainPtr domain, const std::string& vmName) {
     json stats;
     
@@ -84,57 +212,6 @@ json VMOperations::getVMStatsInternal(virDomainPtr domain, const std::string& vm
     };
     
     return stats;
-}
-
-json VMOperations::listAllVMs() {
-    json result;
-    result["success"] = false;
-    
-    if (!conn) {
-        result["error"] = "Not connected to libvirt";
-        return result;
-    }
-    
-    virDomainPtr* domains;
-    int numDomains = virConnectListAllDomains(conn, &domains, 0);
-    
-    if (numDomains < 0) {
-        result["error"] = "Error listing VMs";
-        return result;
-    }
-    
-    json vms = json::array();
-    
-    for (int i = 0; i < numDomains; i++) {
-        const char* name = virDomainGetName(domains[i]);
-        virDomainInfo info;
-        virDomainGetInfo(domains[i], &info);
-        
-        int id = virDomainGetID(domains[i]);
-        std::string state = getStateString(info.state);
-        bool isRunning = (info.state == VIR_DOMAIN_RUNNING);
-        
-        json vm = {
-            {"id", id},
-            {"name", name},
-            {"state", state},
-            {"running", isRunning},
-            {"stats", nullptr}
-        };
-        
-        if (isRunning) {
-            vm["stats"] = getVMStatsInternal(domains[i], name);
-        }
-        
-        vms.push_back(vm);
-        virDomainFree(domains[i]);
-    }
-    
-    free(domains);
-    
-    result["success"] = true;
-    result["vms"] = vms;
-    return result;
 }
 
 json VMOperations::getVMInfo(const std::string& name) {
@@ -297,6 +374,8 @@ bool VMOperations::deployVM(const json& vmParams) {
     
     // Extract parameters
     std::string hostname = vmParams["hostname"];
+    std::string actualHostname = vmParams["owner"].get<std::string>() + "-" + hostname;
+
     int memory = vmParams["memory"];
     int vcpus = vmParams["vcpus"];
     int disk = vmParams["disk"];
@@ -480,7 +559,7 @@ bool VMOperations::deployVM(const json& vmParams) {
         // Create user-data file
         std::stringstream userData;
         userData << "#cloud-config\n"
-                 << "hostname: " << hostname << "\n"
+                 << "hostname: " << actualHostname << "\n"
                  << "fqdn: " << hostname << ".local\n"
                  << "manage_etc_hosts: true\n\n"
                  << "users:\n"

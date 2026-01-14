@@ -1,5 +1,7 @@
 #include "../include/user_operations.hpp"
 #include "../include/utils.hpp"
+#include "../include/vm_lookup.hpp"
+
 #include <fstream>
 #include <iostream>
 #include <sys/stat.h>
@@ -98,6 +100,100 @@ json UserOperations::createUser(const json& userData) {
     return result;
 }
 
+
+json UserOperations::checkUserQuota(const std::string& username, const json& vmRequest) {
+    json result;
+    result["allowed"] = false;
+    
+    auto userResult = getUser(username);
+    if (!userResult["success"].get<bool>()) {
+        result["error"] = "User not found";
+        return result;
+    }
+    
+    json user = userResult["user"];
+    auto usage = getUserUsage(username);
+    
+    if (!usage["success"].get<bool>()) {
+        result["error"] = "Could not get usage";
+        return result;
+    }
+    
+    // Extract requested resources
+    int requestedVCPU = vmRequest["vcpus"].get<int>();
+    int requestedRAM = vmRequest["memory"].get<int>();
+    int requestedDisk = vmRequest["disk"].get<int>();
+    
+    // Current usage
+    int currentVMs = usage["usage"]["vms"].get<int>();
+    int currentCPU = usage["usage"]["cpu"].get<int>();
+    int currentRAM = usage["usage"]["ram"].get<int>();
+    long long currentStorage = usage["usage"]["storage"].get<long long>();
+    
+    // Quotas
+    int maxVMs = user["quotas"]["maxVMs"].get<int>();
+    int maxCPU = user["quotas"]["maxCPU"].get<int>();
+    int maxRAM = user["quotas"]["maxRAM"].get<int>();
+    long long maxStorage = user["quotas"]["maxStorage"].get<long long>() * 1024LL * 1024LL * 1024LL; // GB to bytes
+    
+    // Check each quota
+    if (currentVMs + 1 > maxVMs) {
+        result["error"] = "VM quota exceeded";
+        result["details"] = {
+            {"current", currentVMs},
+            {"requested", 1},
+            {"max", maxVMs},
+            {"resource", "VMs"}
+        };
+        return result;
+    }
+    
+    if (currentCPU + requestedVCPU > maxCPU) {
+        result["error"] = "CPU quota exceeded";
+        result["details"] = {
+            {"current", currentCPU},
+            {"requested", requestedVCPU},
+            {"max", maxCPU},
+            {"resource", "vCPUs"}
+        };
+        return result;
+    }
+    
+    if (currentRAM + requestedRAM > maxRAM) {
+        result["error"] = "RAM quota exceeded";
+        result["details"] = {
+            {"current", currentRAM},
+            {"requested", requestedRAM},
+            {"max", maxRAM},
+            {"resource", "Memory (MB)"}
+        };
+        return result;
+    }
+    
+    long long requestedStorageBytes = (long long)requestedDisk * 1024LL * 1024LL * 1024LL;
+    if (currentStorage + requestedStorageBytes > maxStorage) {
+        result["error"] = "Storage quota exceeded";
+        result["details"] = {
+            {"current", currentStorage / (1024*1024*1024)},
+            {"requested", requestedDisk},
+            {"max", maxStorage / (1024*1024*1024)},
+            {"resource", "Storage (GB)"}
+        };
+        return result;
+    }
+    
+    result["allowed"] = true;
+    result["remaining"] = {
+        {"vms", maxVMs - currentVMs - 1},
+        {"cpu", maxCPU - currentCPU - requestedVCPU},
+        {"ram", maxRAM - currentRAM - requestedRAM},
+        {"storage", (maxStorage - currentStorage - requestedStorageBytes) / (1024*1024*1024)}
+    };
+    
+    return result;
+}
+
+
 json UserOperations::listUsers() {
     json result;
     result["success"] = true;
@@ -188,6 +284,37 @@ json UserOperations::updateUserQuotas(const std::string& username, const json& q
     return updateUser(username, updates);
 }
 
+int UserOperations::listUserDomains(virDomainPtr **domains, 
+                                    std::string username, 
+                                    int flags) {
+    virDomainPtr* allDomains = nullptr;
+
+    int numDomains = 0;
+    int numUserDomains = 0;
+    
+    // Get all domains
+    numDomains = virConnectListAllDomains(conn, &allDomains, flags);
+    if (numDomains < 0) {
+        std::cerr << "Failed to list domains" << std::endl;
+        return -1;
+    }
+    
+    // Filter by user
+    VMNameManager::filterUserVMs(allDomains, username, 
+                                 domains, numDomains, 
+                                 &numUserDomains);
+    
+    // Free the original array (filterUserVMs creates a new one)
+    if (allDomains) {
+        for (int i = 0; i < numDomains; i++) {
+            virDomainFree(allDomains[i]);
+        }
+        free(allDomains);
+    }
+    
+    return numUserDomains;
+}
+
 json UserOperations::getUserUsage(const std::string& username) {
     json result;
     result["success"] = false;
@@ -214,20 +341,33 @@ json UserOperations::getUserUsage(const std::string& username) {
     
     if (conn) {
         virDomainPtr* domains;
-        int numDomains = virConnectListAllDomains(conn, &domains, 0);
+        int numDomains = listUserDomains(&domains, username, 0);
         
         if (numDomains >= 0) {
             for (int i = 0; i < numDomains; i++) {
-                // In a real implementation, you'd check VM ownership
-                // For now, we'll just count all VMs
                 virDomainInfo info;
+                virDomainBlockInfo block_info;
+                unsigned long long totalSize = 0;
+
                 if (virDomainGetInfo(domains[i], &info) == 0) {
+                          
                     vmCount++;
                     totalCPU += info.nrVirtCpu;
                     totalRAM += info.memory / 1024; // Convert to MB
                     
-                    // Get disk usage (simplified)
-                    totalStorage += 10; // Placeholder: 10 GB per VM
+                    if (virDomainGetBlockInfo(domains[i], "vda", &block_info, 0) == 0) {
+                        totalSize = block_info.capacity;  // Taille virtuelle
+                        // info.allocation - espace réellement utilisé
+                        // info.physical - taille physique sur l'hôte
+                    }else if(virDomainGetBlockInfo(domains[i], "qcow", &block_info, 0) == 0)
+                    {
+                        totalSize = block_info.capacity;  // Taille virtuelle
+                    }else if(virDomainGetBlockInfo(domains[i], "hda", &block_info, 0) == 0)
+                    {
+                        totalSize = block_info.capacity;  // Taille virtuelle
+                    }
+                        
+                    totalStorage += totalSize; 
                 }
                 virDomainFree(domains[i]);
             }
