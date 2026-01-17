@@ -38,6 +38,11 @@ APIRoutes::APIRoutes(VMOperations* operations, LibvirtManager* mgr)
 
 void APIRoutes::setup(httplib::Server& svr) {
 
+    // Login
+    svr.Get("/api/login", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleLogin(req, res);
+    });
+
     // VM listing
     svr.Get("/api/vms", [this](const httplib::Request& req, httplib::Response& res) {
         this->handleListVMs(req, res);
@@ -151,6 +156,32 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Put("/api/users/:username/quotas", [this](const httplib::Request& req, httplib::Response& res) {
             this->handleUpdateQuotas(req, res);
         });
+}
+
+
+void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res)
+{ 
+    json body;
+    try {
+        body = json::parse(req.body);
+   
+    } catch (const std::exception& e) {
+        std::cerr << "JSON parse error: " << e.what() << std::endl;
+        res.status = 400;
+        json error = {
+            {"success", false}, 
+            {"error", "Invalid JSON: " + std::string(e.what())}
+        };
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
+    std::string userid = body["userID"];
+    std::string password = body["password"];
+
+    json results = userOps->getUser(userid);
+   
+    res.set_content(results.dump(), "application/json");
 }
 
 // Routes Handler definitions
