@@ -27,9 +27,12 @@ int main() {
     
     // Initialize VM operations
     VMOperations vmOps(manager.getConnection());
+
+    // Initialize user operations
+    UserOperations userOps(manager.getConnection());
     
     // Initialize API routes
-    APIRoutes apiRoutes(&vmOps, &manager);
+    APIRoutes apiRoutes(&vmOps, &manager, &userOps);
     
     // Create HTTP server
     Server svr;

@@ -1,6 +1,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra 
-LDFLAGS = -lvirt -lpthread 
+LDFLAGS = -lvirt -lpthread -lssl -lcrypto
+
 
 # Directories
 SRC_DIR = src

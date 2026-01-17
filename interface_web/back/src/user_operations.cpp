@@ -1,6 +1,9 @@
 #include "../include/user_operations.hpp"
 #include "../include/utils.hpp"
 #include "../include/vm_lookup.hpp"
+#include <openssl/sha.h>
+#include <iomanip>
+
 
 #include <fstream>
 #include <iostream>
@@ -24,6 +27,54 @@ void UserOperations::loadUsers() {
     } else {
         users = json::array();
     }
+}
+
+// Hash password with SHA-256
+std::string UserOperations::hashPassword(const std::string& password) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)password.c_str(), password.length(), hash);
+    
+    std::stringstream ss;
+    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
+
+json UserOperations::authenticate(const std::string& username, const std::string& password) {
+    json result;
+    result["success"] = false;
+    
+    for (const auto& user : users) {
+        if (user["username"] == username) {
+            std::string storedHash = user.value("passwordHash", "");
+            std::string inputHash = hashPassword(password);
+            
+            if (storedHash == inputHash && user["active"].get<bool>()) {
+                result["success"] = true;
+                result["token"] = generateToken(username);
+                result["user"] = {
+                    {"username", user["username"]},
+                    {"role", user["role"]},
+                    {"email", user["email"]}
+                };
+                return result;
+            } else {
+                result["error"] = "Invalid password";
+                return result;
+            }
+        }
+    }
+    
+    result["error"] = "User not found";
+    return result;
+}
+
+std::string UserOperations::generateToken(const std::string& username) {
+    // Simple token: username + timestamp + hash
+    auto now = std::chrono::system_clock::now().time_since_epoch().count();
+    std::string tokenData = username + std::to_string(now);
+    return hashPassword(tokenData);
 }
 
 bool UserOperations::saveUsers() {
@@ -51,14 +102,14 @@ json UserOperations::createUser(const json& userData) {
     json result;
     result["success"] = false;
     
-    if (!userData.contains("username")) {
-        result["error"] = "Username is required";
+    if (!userData.contains("username") || !userData.contains("password")) {
+        result["error"] = "Username and password are required";
         return result;
     }
     
     std::string username = userData["username"];
     
-    // Check if user already exists
+    // Check if user exists
     for (const auto& user : users) {
         if (user["username"] == username) {
             result["error"] = "User already exists";
@@ -66,12 +117,17 @@ json UserOperations::createUser(const json& userData) {
         }
     }
     
-    // Create new user
+    // Hash password
+    std::string passwordHash = hashPassword(userData["password"].get<std::string>());
+    
     json newUser = {
         {"id", users.size() + 1},
         {"username", username},
+        {"passwordHash", passwordHash},
         {"role", userData.value("role", "user")},
         {"email", userData.value("email", "")},
+        {"firstName", userData.value("firstName", "")},
+        {"lastName", userData.value("lastName", "")},
         {"quotas", {
             {"maxVMs", userData.value("maxVMs", 5)},
             {"maxCPU", userData.value("maxCPU", 8)},
@@ -93,13 +149,13 @@ json UserOperations::createUser(const json& userData) {
     if (saveUsers()) {
         result["success"] = true;
         result["user"] = newUser;
+        result["user"].erase("passwordHash"); // Don't send hash
     } else {
         result["error"] = "Failed to save user";
     }
     
     return result;
 }
-
 
 json UserOperations::checkUserQuota(const std::string& username, const json& vmRequest) {
     json result;

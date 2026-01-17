@@ -38,9 +38,13 @@ APIRoutes::APIRoutes(VMOperations* operations, LibvirtManager* mgr)
 
 void APIRoutes::setup(httplib::Server& svr) {
 
-    // Login
-    svr.Get("/api/login", [this](const httplib::Request& req, httplib::Response& res) {
+    // Login and Auth
+    svr.Post("/api/auth/login", [this](const httplib::Request& req, httplib::Response& res) {
         this->handleLogin(req, res);
+    });
+
+    svr.Post("/api/auth/register", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleCreateUser(req, res);
     });
 
     // VM listing
@@ -158,30 +162,35 @@ void APIRoutes::setup(httplib::Server& svr) {
         });
 }
 
-
-void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res)
-{ 
+void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {
     json body;
     try {
         body = json::parse(req.body);
-   
     } catch (const std::exception& e) {
-        std::cerr << "JSON parse error: " << e.what() << std::endl;
         res.status = 400;
-        json error = {
-            {"success", false}, 
-            {"error", "Invalid JSON: " + std::string(e.what())}
-        };
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
         res.set_content(error.dump(), "application/json");
         return;
     }
-
-    std::string userid = body["userID"];
-    std::string password = body["password"];
-
-    json results = userOps->getUser(userid);
-   
-    res.set_content(results.dump(), "application/json");
+    
+    if (!body.contains("username") || !body.contains("password")) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Username and password required"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.authenticate(
+        body["username"].get<std::string>(),
+        body["password"].get<std::string>()
+    );
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 401;
+    }
+    
+    res.set_content(result.dump(), "application/json");
 }
 
 // Routes Handler definitions
@@ -718,22 +727,156 @@ void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response&
 }
 
 
-void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& res){
+void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& res) {
+    auto userCtx = getUserContext(req);
     
-}
-void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res){
+    if (!userCtx.isAdmin) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Admin access required"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
     
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.getAllUsersUsage();
+    res.set_content(result.dump(), "application/json");
 }
+
+
+void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {
+    auto userCtx = getUserContext(req);
+    
+    if (!userCtx.isAdmin) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Admin access required"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (...) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.createUser(body);
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 400;
+    }
+    
+    res.set_content(result.dump(), "application/json");
+}    
+
 void APIRoutes::handleUpdateUser(const httplib::Request& req, httplib::Response& res){
+    auto userCtx = getUserContext(req);
     
+    if (!userCtx.isAdmin) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Admin access required"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (...) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
+    std::string username = req.matches[1];
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.updateUser(username, body);
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 400;
+    }
+    
+    res.set_content(result.dump(), "application/json");
 }
 
 void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response& res){
+     json body;
+    try {
+        body = json::parse(req.body);
+    } catch (...) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+
+    std::string username = req.matches[1];
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.deleteUser(username);
     
+    if (!result["success"].get<bool>()) {
+        res.status = 400;
+    }
+    
+    res.set_content(result.dump(), "application/json");
+
 }
 void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Response& res){
-    
-}
-void APIRoutes::handleUpdateQuotas(const httplib::Request& req, httplib::Response& res){
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (...) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
 
+    std::string username = req.matches[1];
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.getUserUsage(username);
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 400;
+    }
+    
+    res.set_content(result.dump(), "application/json");
+
+}
+
+void APIRoutes::handleUpdateQuotas(const httplib::Request& req, httplib::Response& res) {
+    auto userCtx = getUserContext(req);
+    
+    if (!userCtx.isAdmin) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Admin access required"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    std::string username = req.matches[1];
+    
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (...) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    UserOperations userOps(manager->getConnection());
+    json result = userOps.updateUserQuotas(username, body);
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 400;
+    }
+    
+    res.set_content(result.dump(), "application/json");
 }
