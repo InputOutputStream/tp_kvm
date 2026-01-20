@@ -94,7 +94,7 @@ async function loadConsoleInfo() {
         }
     } catch (error) {
         consoleDetails.innerHTML = `
-            <p class="error-text">❌ Error loading console information</p>
+            <p class="error-text">❌ Error ${error.message} </p>
         `;
     }
 }
@@ -375,3 +375,17 @@ function copyToClipboard(text) {
         showToast('❌ Failed to copy', 'error');
     });
 }
+
+
+window.showConsoleModal = showConsoleModal;
+window.closeConsoleModal = closeConsoleModal;
+window.showSnapshotModal = showSnapshotModal;
+window.closeSnapshotModal = closeSnapshotModal;
+window.createSnapshot = createSnapshot;
+window.showCloneModal = showCloneModal;
+window.closeCloneModal = closeCloneModal;
+window.cloneVM = cloneVM;
+window.showDeleteVMModal = showDeleteVMModal;
+window.closeDeleteVMModal = closeDeleteVMModal;
+window.deleteVMConfirmed = deleteVMConfirmed;
+window.copyToClipboard = copyToClipboard;

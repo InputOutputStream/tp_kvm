@@ -3,20 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>THOTH CLOUD - Plateforme de Gestion VM</title>
+    <title>THOTH CLOUD</title>
     <link rel="stylesheet" href="styles/main.css">
     <link rel="stylesheet" href="styles/sidebar.css">
     <link rel="stylesheet" href="styles/cards.css">
     <link rel="stylesheet" href="styles/forms.css">
     <link rel="stylesheet" href="styles/modals.css">
+    <link rel="stylesheet" href="styles/dark-theme.css" id="theme-style">
+    <link rel="stylesheet" href="styles/auth.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
+    <script src="scripts/auth-check.js"></script>
 </head>
-<body>
-    <!-- Sidebar Navigation -->
+<!-- Sidebar Navigation -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="logo">
-                <div class="logo-icon">🌍</div>
+                <div class="logo-icon">🌐</div>
                 <div class="logo-text">
                     <h1>THOTH</h1>
                     <p>Cloud Platform</p>
@@ -70,6 +73,22 @@
                 <a href="#" class="nav-item" data-view="system">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-text">System Info</span>
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <h3 class="nav-section-title">PERSONNALISATION</h3>
+                <a href="#" class="nav-item" onclick="toggleTheme()" id="theme-toggle">
+                    <span class="nav-icon">🌙</span>
+                    <span class="nav-text">Mode sombre</span>
+                </a>
+                <a href="#" class="nav-item" onclick="showProfileModal()">
+                    <span class="nav-icon">👤</span>
+                    <span class="nav-text">Mon profil</span>
+                </a>
+                <a href="#" class="nav-item" onclick="authService.logout()">
+                    <span class="nav-icon">🚪</span>
+                    <span class="nav-text">Déconnexion</span>
                 </a>
             </div>
         </nav>
@@ -139,7 +158,7 @@
                 <h3 class="section-title">Quick Actions</h3>
                 <div class="quick-actions-grid">
                     <button class="action-card" onclick="switchView('deploy')">
-                        <span class="action-icon"></span>
+                        <span class="action-icon">🚀</span>
                         <h4>Deploy New VM</h4>
                         <p>Create a new virtual machine</p>
                     </button>
@@ -737,11 +756,15 @@
     <!-- Toast Notifications -->
     <div id="toast" class="toast"></div>
 
-    <script src="scripts/main.js" type="module"></script>
+    <script src="scripts/theme.js"></script>
+    <script src="scripts/auth.js"></script>
+    <script src="scripts/vms.js"></script>  
     <script src="scripts/navigation.js"></script>
-    <script src="scripts/vms.js"></script>
     <script src="scripts/deploy.js"></script>
-    <!-- <script src="scripts/monitoring.js"></script>-->
-    <script src="scripts/modals.js"></script> 
+    <script src="scripts/modals.js"></script>
+    <script src="scripts/profil.js"></script>
+
+    <script src="scripts/main.js" type="module"></script>
+
 </body>
 </html>

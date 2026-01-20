@@ -1,0 +1,432 @@
+/* Dark Theme Variables */
+.dark-theme {
+    --primary-color: #00c853;
+    --primary-dark: #00b248;
+    --secondary-color: #6c757d;
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+    
+    --bg-primary: #121212;
+    --bg-secondary: #1e1e1e;
+    --bg-tertiary: #2d2d2d;
+    
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --text-tertiary: #808080;
+    
+    --border-color: #404040;
+    --border-light: #333333;
+    
+    --card-bg: #1e1e1e;
+    --card-border: #333333;
+    --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    
+    --sidebar-bg: #1a1a1a;
+    --sidebar-border: #2a2a2a;
+    
+    --hover-bg: #2a2a2a;
+    --active-bg: #333333;
+    
+    --input-bg: #2d2d2d;
+    --input-border: #404040;
+    --input-focus: #00c853;
+    
+    --table-header: #2a2a2a;
+    --table-row: #1e1e1e;
+    --table-hover: #2d2d2d;
+    
+    --modal-bg: #1e1e1e;
+    --modal-border: #333333;
+    --modal-overlay: rgba(0, 0, 0, 0.7);
+    
+    --toast-bg: #2d2d2d;
+    --toast-border: #404040;
+    
+    --progress-bg: #333333;
+    --progress-fill: #00c853;
+    
+    --disabled-bg: #2a2a2a;
+    --disabled-text: #666666;
+    
+    /* Additional variables for consistency */
+    --primary: #00c853;
+    --primary-light: #00e676;
+    --secondary: #0077B6;
+    --accent: #FFD700;
+    
+    --bg-main: #121212;
+    --bg-card: #1e1e1e;
+    --bg-hover: #2a2a2a;
+    --bg-dark: #0a0a0a;
+    
+    --border: #333333;
+    --border-light: #2a2a2a;
+    
+    --success: #2E7D32;
+    --warning: #F9A825;
+    --danger: #C62828;
+    --info: #0288D1;
+    
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Dark Theme Specific Overrides */
+.dark-theme body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.dark-theme .sidebar {
+    background-color: var(--sidebar-bg);
+    border-right-color: var(--sidebar-border);
+}
+
+.dark-theme .card,
+.dark-theme .vm-card,
+.dark-theme .app-card,
+.dark-theme .cluster-card,
+.dark-theme .stat-card,
+.dark-theme .action-card,
+.dark-theme .billing-card,
+.dark-theme .chart-card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+    box-shadow: var(--card-shadow);
+}
+
+.dark-theme .btn {
+    transition: all 0.2s ease;
+}
+
+.dark-theme .btn-secondary {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.dark-theme .btn-secondary:hover {
+    background-color: var(--hover-bg);
+}
+
+.dark-theme input,
+.dark-theme select,
+.dark-theme textarea {
+    background-color: var(--input-bg) !important;
+    border-color: var(--input-border);
+    color: var(--text-primary) !important;
+}
+
+.dark-theme input::placeholder,
+.dark-theme textarea::placeholder {
+    color: var(--text-tertiary);
+}
+
+.dark-theme input:focus,
+.dark-theme select:focus,
+.dark-theme textarea:focus {
+    border-color: var(--input-focus);
+    box-shadow: 0 0 0 2px rgba(0, 200, 83, 0.25);
+}
+
+.dark-theme .data-table {
+    background-color: var(--card-bg);
+}
+
+.dark-theme .data-table thead {
+    background-color: var(--table-header);
+}
+
+.dark-theme .data-table thead th {
+    color: var(--text-secondary);
+}
+
+.dark-theme .data-table tbody tr {
+    background-color: var(--table-row);
+}
+
+.dark-theme .data-table tbody tr:hover {
+    background-color: var(--table-hover);
+}
+
+.dark-theme .data-table tbody td {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+.dark-theme .modal-content,
+.dark-theme .modal {
+    background-color: var(--modal-bg);
+    border-color: var(--modal-border);
+}
+
+.dark-theme .modal-overlay {
+    background-color: var(--modal-overlay);
+}
+
+.dark-theme .toast {
+    background-color: var(--toast-bg);
+    border-color: var(--toast-border);
+    color: var(--text-primary);
+}
+
+.dark-theme .progress-bar {
+    background-color: var(--progress-bg);
+}
+
+.dark-theme .progress-fill {
+    background-color: var(--progress-fill);
+}
+
+.dark-theme .details-panel {
+    background-color: var(--card-bg);
+    border-left-color: var(--border-color);
+}
+
+.dark-theme .info-banner,
+.dark-theme .warning-banner {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.dark-theme .form-section {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+}
+
+.dark-theme .flavor-card .flavor-content {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.dark-theme .flavor-card input:checked ~ .flavor-content {
+    border-color: var(--primary-color);
+    background-color: rgba(0, 200, 83, 0.1);
+}
+
+.dark-theme .code,
+.dark-theme code {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-color);
+    color: var(--text-primary) !important;
+}
+
+.dark-theme .system-info-text {
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.dark-theme .auth-page {
+    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+}
+
+.dark-theme .auth-card {
+    background-color: var(--card-bg);
+    border-color: var(--border-color);
+}
+
+/* Fix for white backgrounds */
+.dark-theme .page-header,
+.dark-theme .filters-bar,
+.dark-theme .content-section,
+.dark-theme .quotas-summary,
+.dark-theme .users-table-container,
+.dark-theme .billing-details,
+.dark-theme .chart-container,
+.dark-theme .system-info-container,
+.dark-theme .swarm-config-card {
+    background-color: var(--card-bg) !important;
+    border-color: var(--border-color);
+}
+
+/* Fix search input */
+.dark-theme .search-input {
+    background-color: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--input-border);
+}
+
+/* Fix chips/filters */
+.dark-theme .chip {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.dark-theme .chip:hover {
+    background-color: var(--hover-bg);
+}
+
+.dark-theme .chip.active {
+    background-color: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+/* Fix flavor cards */
+.dark-theme .radio-option span {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.dark-theme .radio-option:hover span {
+    background-color: var(--hover-bg);
+}
+
+.dark-theme .radio-option input:checked ~ span {
+    background-color: rgba(0, 200, 83, 0.2);
+    color: var(--primary);
+}
+
+/* Fix labels */
+.dark-theme label,
+.dark-theme .form-section-title,
+.dark-theme .section-title,
+.dark-theme .page-title h2,
+.dark-theme h1, .dark-theme h2, .dark-theme h3, .dark-theme h4, .dark-theme h5, .dark-theme h6 {
+    color: var(--text-primary) !important;
+}
+
+/* Fix small text */
+.dark-theme small,
+.dark-theme .page-subtitle,
+.dark-theme .stat-label,
+.dark-theme .vm-card-meta,
+.dark-theme .app-card-description {
+    color: var(--text-secondary) !important;
+}
+
+/* Fix deployment progress */
+.dark-theme .deployment-progress {
+    background-color: var(--card-bg);
+    border-color: var(--border-color);
+}
+
+.dark-theme .progress-step {
+    background-color: var(--bg-tertiary);
+}
+
+.dark-theme .progress-step.active {
+    background-color: rgba(0, 200, 83, 0.1);
+}
+
+.dark-theme .step-indicator {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.dark-theme .result-details {
+    background-color: var(--bg-tertiary) !important;
+}
+
+/* Fix VNC/Console info */
+.dark-theme .console-details,
+.dark-theme .console-info {
+    background-color: var(--bg-tertiary);
+}
+
+.dark-theme .info-grid .info-item {
+    color: var(--text-primary);
+}
+
+/* Fix snapshot items */
+.dark-theme .snapshot-item {
+    background-color: var(--bg-tertiary);
+}
+
+.dark-theme .snapshot-info h4,
+.dark-theme .snapshot-info p {
+    color: var(--text-primary);
+}
+
+/* Fix app category badges */
+.dark-theme .app-category-badge {
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+/* Chart.js Dark Theme */
+.dark-theme .chartjs-render-monitor {
+    filter: brightness(0.8) contrast(1.2);
+}
+
+/* Scrollbar Styling for Dark Theme */
+.dark-theme ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.dark-theme ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+.dark-theme ::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.dark-theme ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}
+
+/* Fix stat card icons */
+.dark-theme .stat-icon {
+    color: var(--text-primary);
+}
+
+.dark-theme .stat-value {
+    color: var(--text-primary) !important;
+}
+
+/* Fix action cards */
+.dark-theme .action-card h4,
+.dark-theme .action-card p {
+    color: var(--text-primary);
+}
+
+/* Fix info banners */
+.dark-theme .info-banner {
+    background-color: rgba(2, 136, 209, 0.1);
+}
+
+.dark-theme .info-banner h4,
+.dark-theme .info-banner p {
+    color: var(--text-primary);
+}
+
+/* Fix quota items */
+.dark-theme .quota-item {
+    color: var(--text-primary);
+}
+
+.dark-theme .quota-item span {
+    color: var(--text-secondary);
+}
+
+.dark-theme .quota-item strong {
+    color: var(--text-primary);
+}
+
+/* Fix cluster info */
+.dark-theme .cluster-header h3 {
+    color: var(--text-primary);
+}
+
+.dark-theme .info-item {
+    color: var(--text-primary);
+}
+
+/* Disable transitions on theme variables only */
+.dark-theme * {
+    transition-property: transform, opacity, box-shadow !important;
+}
+
+/* Force text color for loading states */
+.dark-theme .loading-text {
+    color: var(--text-tertiary) !important;
+}

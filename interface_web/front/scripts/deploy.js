@@ -1,7 +1,3 @@
-/* ==========================================
-   THOTH CLOUD - VM Deployment
-   ========================================== */
-
 // Toggle Auth Method
 function toggleAuthMethod() {
     const authMethod = document.querySelector('input[name="auth-method"]:checked').value;
@@ -46,7 +42,6 @@ function updateProgressStep(stepNum, status) {
 async function deployVM(event) {
     event.preventDefault();
     
-    // Get flavor selection
     const selectedFlavor = document.querySelector('input[name="flavor"]:checked');
     if (!selectedFlavor) {
         showToast('Please select a flavor', 'error');
@@ -56,39 +51,27 @@ async function deployVM(event) {
     const flavorType = selectedFlavor.value;
     const flavorConfig = getFlavorConfig(flavorType);
     
-    // Get form values
-    const hostname = document.getElementById('vm-hostname').value;
-    const network = document.getElementById('vm-network').value;
-    const username = document.getElementById('vm-username').value;
-    const authMethod = document.querySelector('input[name="auth-method"]:checked').value;
-    const password = authMethod === 'password' ? document.getElementById('vm-password').value : "";
-    const sshKey = authMethod === 'ssh-key' ? document.getElementById('vm-ssh-key').value : "";
+    const deployData = {
+        hostname: document.getElementById('vm-hostname').value,  // User's chosen name
+        memory: flavorConfig.memory,
+        vcpus: flavorConfig.vcpus,
+        disk: flavorConfig.disk,
+        network: document.getElementById('vm-network').value,
+        username: document.getElementById('vm-username').value,
+        authMethod: document.querySelector('input[name="auth-method"]:checked').value,
+        password: document.getElementById('vm-password').value,
+        sshKey: document.getElementById('vm-ssh-key').value,
+        flavor: flavorType
+    };
     
-    // Show progress
     document.getElementById('deploy-form').style.display = 'none';
     document.getElementById('deployment-progress').style.display = 'block';
     
     try {
-        // Step 1: Generate cloud-init
         updateProgressStep(1, 'loading');
         
-        const deployData = {
-            hostname,
-            memory: flavorConfig.memory,
-            vcpus: flavorConfig.vcpus,
-            disk: flavorConfig.disk,
-            network,
-            username,
-            authMethod,
-            password,
-            sshKey,
-            flavor: flavorType
-        };
-        
-        // Call backend to deploy VM
         const result = await fetchAPI('/vms/deploy', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(deployData)
         });
         
@@ -96,21 +79,23 @@ async function deployVM(event) {
         updateProgressStep(2, 'success');
         updateProgressStep(3, 'success');
         
-        // Step 4: Wait for cloud-init
+        // Wait for cloud-init
         updateProgressStep(4, 'loading');
         await new Promise(resolve => setTimeout(resolve, 60000));
         updateProgressStep(4, 'success');
         
-        // Step 5: Get IP address
+        // Get IP - use internal VM name from result
         updateProgressStep(5, 'loading');
-        const ipResult = await waitForVMIP(hostname, 30);
+        const internalName = result.vmName;
+        const ipResult = await waitForVMIP(internalName, 30);
         updateProgressStep(5, 'success');
         
-        // Show result
-        document.getElementById('result-hostname').textContent = hostname;
+        // Show result with display name
+        const displayName = result.displayName || deployData.hostname;
+        document.getElementById('result-hostname').textContent = displayName;
         document.getElementById('result-ip').textContent = ipResult.primaryIP || 'IP not available';
-        document.getElementById('result-username').textContent = username;
-        document.getElementById('ssh-command').textContent = `ssh ${username}@${ipResult.primaryIP}`;
+        document.getElementById('result-username').textContent = deployData.username;
+        document.getElementById('ssh-command').textContent = `ssh ${deployData.username}@${ipResult.primaryIP}`;
         document.getElementById('deployment-result').style.display = 'block';
         
         showToast('✅ VM deployed successfully!', 'success');
@@ -119,13 +104,16 @@ async function deployVM(event) {
     } catch (error) {
         showToast(`❌ Deployment error: ${error.message}`, 'error');
         
-        // Reset form
+        // Show quota error details if available
+        if (error.message.includes('quota exceeded')) {
+            showToast('💡 Contact admin to increase your quota', 'info');
+        }
+        
         setTimeout(() => {
             document.getElementById('deploy-form').style.display = 'block';
             document.getElementById('deployment-progress').style.display = 'none';
             document.getElementById('deployment-result').style.display = 'none';
             
-            // Reset all steps
             for (let i = 1; i <= 5; i++) {
                 const step = document.getElementById(`step-${i}`);
                 step.className = 'progress-step';
@@ -139,20 +127,20 @@ async function deployVM(event) {
 function getFlavorConfig(flavorType) {
     const flavors = {
         small: {
-            memory: 2048,  // 2GB
+            memory: 1024,  // 2GB
             vcpus: 1,
             disk: 15,
             price: 2500
         },
         medium: {
-            memory: 4096,  // 4GB
-            vcpus: 2,
+            memory: 2048,  // 4GB
+            vcpus: 1,
             disk: 20,
             price: 3500
         },
         large: {
-            memory: 8192,  // 8GB
-            vcpus: 4,
+            memory: 4096,  // 8GB
+            vcpus: 2,
             disk: 40,
             price: 6500
         }

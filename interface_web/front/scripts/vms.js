@@ -1,5 +1,7 @@
 
-const API_URL = 'http://localhost:3000/api';
+// window.API_URL = 'http://localhost:3000/api';
+// const API_URL = window.API_URL;
+
 let currentVM = null;
 let statsInterval = null;
 
@@ -34,17 +36,14 @@ async function fetchAPI(endpoint, options = {}) {
 // Load VMs
 async function loadVMs() {
     const vmsList = document.getElementById('vms-list');
-    if (!vmsList) return;
+    const dashboardList = document.getElementById('dashboard-vms-list');
     
-    vmsList.innerHTML = '<p class="loading-text">Loading virtual machines...</p>';
+    if (vmsList) {
+        vmsList.innerHTML = '<p class="loading-text">Loading virtual machines...</p>';
+    }
     
     try {
-        const data = await fetchAPI('/vms');
-        
-        if (data.vms.length === 0) {
-            vmsList.innerHTML = '<p class="loading-text">No VMs found</p>';
-            return;
-        }
+        const data = await window.fetchAPI('/vms');
         
         const runningCount = data.vms.filter(vm => vm.running).length;
         document.getElementById('running-count').textContent = runningCount;
@@ -55,13 +54,26 @@ async function loadVMs() {
             vmCountBadge.textContent = data.vms.length;
         }
         
-        vmsList.innerHTML = '';
-        data.vms.forEach(vm => {
-            const vmCard = createVMCard(vm);
-            vmsList.appendChild(vmCard);
-        });
+        if (data.vms.length === 0) {
+            if (vmsList) vmsList.innerHTML = '<p class="loading-text">No VMs found. Deploy your first VM!</p>';
+            if (dashboardList) dashboardList.innerHTML = '<p class="loading-text">No VMs deployed yet</p>';
+            return;
+        }
+        
+        if (vmsList) {
+            vmsList.innerHTML = '';
+            data.vms.forEach(vm => vmsList.appendChild(createVMCard(vm)));
+        }
+        
+        if (dashboardList) {
+            dashboardList.innerHTML = '';
+            data.vms.slice(0, 4).forEach(vm => dashboardList.appendChild(createVMCard(vm)));
+        }
     } catch (error) {
-        vmsList.innerHTML = '<p class="loading-text">Error loading VMs</p>';
+        console.error('Error loading VMs:', error);
+        if (vmsList) vmsList.innerHTML = `<p class="loading-text">Error: ${error.message}</p>`;
+        if (dashboardList) dashboardList.innerHTML = `<p class="loading-text">Error loading VMs</p>`;
+        showToast(`Error loading VMs: ${error.message}`, 'error');
     }
 }
 
@@ -69,10 +81,13 @@ async function loadVMs() {
 function createVMCard(vm) {
     const card = document.createElement('div');
     card.className = 'vm-card';
-    card.onclick = () => selectVM(vm.name);
+    card.onclick = () => selectVM(vm.name);  // Use internal name for operations
     
     const statusClass = vm.running ? 'running' : 'stopped';
     const statusText = vm.running ? '🟢 Running' : '🔴 Stopped';
+    
+    // Show display name to user, but use internal name for operations
+    const displayName = vm.displayName || vm.name;
     
     let statsHTML = '';
     if (vm.stats) {
@@ -88,12 +103,19 @@ function createVMCard(vm) {
         `;
     }
     
+    // Show owner for admin users
+    let ownerBadge = '';
+    if (authService.currentUser?.role === 'admin' && vm.owner) {
+        ownerBadge = `<span class="owner-badge">👤 ${vm.owner}</span>`;
+    }
+    
     card.innerHTML = `
         <div class="vm-card-header">
             <div>
-                <h3 class="vm-card-title">🖥️ ${vm.name}</h3>
+                <h3 class="vm-card-title">🖥️ ${displayName}</h3>
                 <div class="vm-card-meta">
                     <span>State: ${vm.state}</span>
+                    ${ownerBadge}
                 </div>
             </div>
             <span class="vm-card-status ${statusClass}">${statusText}</span>
@@ -119,19 +141,21 @@ async function selectVM(vmName) {
         panelTitle.textContent = `VM: ${vmName}`;
     }
     
-    if (statsInterval) {
-        clearInterval(statsInterval);
-    }
+    if (statsInterval) { clearInterval(statsInterval); }
     
     await loadVMInfo();
     await loadSnapshots();
     
-    const statusData = await fetchAPI(`/vms/${currentVM}/status`);
-    if (statusData.running) {
-        document.getElementById('vm-stats').style.display = 'grid';
-        startStatsUpdate();
-    } else {
-        document.getElementById('vm-stats').style.display = 'none';
+    try {
+        const statusData = await window.fetchAPI(`/vms/${currentVM}/status`);
+        if (statusData.running) {
+            document.getElementById('vm-stats').style.display = 'grid';
+            startStatsUpdate();
+        } else {
+            document.getElementById('vm-stats').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error checking VM status:', error);
     }
 }
 
@@ -155,6 +179,7 @@ function startStatsUpdate() {
     updateStats();
     statsInterval = setInterval(updateStats, 3000);
 }
+
 
 // Update Stats
 async function updateStats() {
@@ -273,9 +298,8 @@ async function loadSnapshots() {
         }
         
         snapshotsList.innerHTML = '';
-        data.snapshots.forEach(snapshot => {
-            const snapshotItem = createSnapshotItem(snapshot);
-            snapshotsList.appendChild(snapshotItem);
+        data.snapshots.forEach(snapshot => {            
+            snapshotsList.appendChild(createSnapshotItem(snapshot));
         });
     } catch (error) {
         snapshotsList.innerHTML = '<p>Error loading snapshots</p>';
@@ -387,3 +411,26 @@ filterChips.forEach(chip => {
         });
     });
 });
+
+
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+}
+
+
+// Export to global scope
+window.loadVMs = loadVMs;
+window.currentVM = currentVM;
+window.selectVM = selectVM;
+window.startVM = startVM;
+window.shutdownVM = shutdownVM;
+window.rebootVM = rebootVM;
+window.pauseVM = pauseVM;
+window.resumeVM = resumeVM;
+window.loadSnapshots = loadSnapshots;
+window.revertSnapshot = revertSnapshot;
+window.deleteSnapshot = deleteSnapshot;

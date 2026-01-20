@@ -1,5 +1,4 @@
-import APPS_CATALOG from "./paas-catalog";
-
+import APPS_CATALOG from "./paas-catalog.js";
 
 // Users Data (for demo)
 let users = [
@@ -7,6 +6,22 @@ let users = [
     { id: 2, username: 'dev1', role: 'user', vms: 2, cpu: 4, ram: 8 },
     { id: 3, username: 'dev2', role: 'user', vms: 1, cpu: 2, ram: 4 }
 ];
+
+
+const style = document.createElement('style');
+style.textContent = `
+    .owner-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        background: rgba(0, 132, 61, 0.1);
+        border-radius: 12px;
+        font-size: 0.85em;
+        color: var(--primary-color);
+        margin-left: 8px;
+    }
+`;
+document.head.appendChild(style);
+
 
 // Monitoring Charts
 let charts = {};
@@ -22,10 +37,17 @@ async function refreshApps() {
     
     appsGrid.innerHTML = '<p class="loading-text">Loading applications...</p>';
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+        const data = await window.fetchAPI('/paas/apps');
+        if (data.success && data.applications) {
+            renderRunningApps(data.applications);
+        } else {
+            renderApps(APPS_CATALOG);
+        }
+    } catch (error) {
+        console.log('Using catalog apps');
         renderApps(APPS_CATALOG);
-    }, 500);
+    }
 }
 
 function renderApps(apps) {
@@ -62,20 +84,71 @@ function createAppCard(app) {
     return card;
 }
 
-function deployApp(appId) {
+function createRunningAppCard(app) {
+    const card = document.createElement('div');
+    card.className = 'app-card';
+    
+    const statusClass = app.running ? 'running' : 'stopped';
+    const statusText = app.running ? '🟢 Running' : '🔴 Stopped';
+    
+    card.innerHTML = `
+        <div class="app-card-icon">📦</div>
+        <h4 class="app-card-title">${app.name}</h4>
+        <p class="app-card-description">Status: ${app.status}</p>
+        <div class="app-card-meta">
+            <span class="status-badge status-${statusClass}">${statusText}</span>
+        </div>
+        <div class="app-card-actions">
+            <button class="btn btn-danger btn-sm" onclick="deleteApp('${app.name}')">
+                Delete
+            </button>
+        </div>
+    `;
+    
+    return card;
+}
+
+
+async function deployApp(appId) {
     const app = APPS_CATALOG.find(a => a.id === appId);
     if (!app) return;
     
-
-
-    // TODO
     showToast(`Deploying ${app.name}...`, 'info');
     
-    // Simulate deployment
-    setTimeout(() => {
-        showToast(`✅ ${app.name} deployed successfully!`, 'success');
-        updateBilling();
-    }, 2000);
+    try {
+        const result = await window.fetchAPI('/paas/deploy', {
+            method: 'POST',
+            body: JSON.stringify({
+                id: appId,
+                name: app.name,
+                dockerImage: app.id,
+                ports: app.ports || [],
+                category: app.category
+            })
+        });
+        
+        if (result.success) {
+            showToast(`✅ ${app.name} deployed successfully!`, 'success');
+            await refreshApps();
+        } else {
+            showToast(`❌ Deployment failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`❌ ${error.message}`, 'error');
+    }
+}
+
+async function deleteApp(appName) {
+    if (!confirm(`Delete application ${appName}?`)) return;
+    
+    try {
+        showToast('Deleting application...', 'info');
+        await window.fetchAPI(`/paas/apps/${appName}`, { method: 'DELETE' });
+        showToast('✅ Application deleted', 'success');
+        await refreshApps();
+    } catch (error) {
+        showToast(`❌ ${error.message}`, 'error');
+    }
 }
 
 // App Search
@@ -109,6 +182,35 @@ document.querySelectorAll('[data-category]').forEach(chip => {
         }
     });
 });
+// ==========================================
+// HOST MANAGEMENT
+// ==========================================
+
+async function loadHosts() {
+    try {
+        const data = await window.fetchAPI('/hosts');
+        renderHosts(data.hosts);
+    } catch (error) {
+        console.error('Error loading hosts:', error);
+        showToast(`Error loading hosts: ${error.message}`, 'error');
+    }
+}
+
+function renderHosts(hosts) {
+    // Update UI with hosts data
+    console.log('Hosts:', hosts);
+}
+
+async function loadHostStats() {
+    try {
+        const data = await window.fetchAPI('/hosts/stats');
+        // Update host stats display
+        console.log('Host stats:', data);
+    } catch (error) {
+        console.error('Error loading host stats:', error);
+    }
+}
+
 
 // ==========================================
 // Docker Swarm Management
@@ -124,9 +226,6 @@ async function deploySwarmCluster() {
     
     showToast(`Creating cluster: ${managerNodes} managers, ${workerNodes} workers...`, 'info');
     
-
-
-    //TODO
     // Simulate cluster creation
     setTimeout(() => {
         showToast('✅ Swarm cluster created successfully!', 'success');
@@ -136,51 +235,159 @@ async function deploySwarmCluster() {
 // ==========================================
 // Users & Quotas Management
 // ==========================================
-
-function showAddUserModal() {
-    showToast('Add User feature - UI ready, backend needed', 'info');
-}
-
-function loadUsersTable() {
+async function loadUsersTable() {
     const tbody = document.getElementById('users-table-body');
     if (!tbody) return;
     
-    tbody.innerHTML = '';
+    tbody.innerHTML = '<tr><td colspan="6">Loading users...</td></tr>';
     
-    users.forEach(user => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>
-                <strong>${user.username}</strong><br>
-                <small style="color: var(--text-secondary)">${user.role}</small>
-            </td>
-            <td>${user.role}</td>
-            <td>${user.vms}</td>
-            <td>${user.cpu} vCPUs</td>
-            <td>${user.ram} GB</td>
-            <td>
-                <button class="btn btn-sm btn-info" onclick="editUser(${user.id})">✏️</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id})">🗑️</button>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
+    try {
+        const data = await window.fetchAPI('/users');
+        
+        if (!data.success || !data.users || data.users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6">No users found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = '';
+        data.users.forEach(user => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <strong>${user.username}</strong><br>
+                    <small style="color: var(--text-secondary)">${user.email || ''}</small>
+                </td>
+                <td><span class="role-badge ${user.role}">${user.role}</span></td>
+                <td>${user.usage?.vms || 0} / ${user.quotas?.maxVMs || 0}</td>
+                <td>${user.usage?.cpu || 0} / ${user.quotas?.maxCPU || 0}</td>
+                <td>${user.usage?.ram || 0} / ${user.quotas?.maxRAM || 0} GB</td>
+                <td>
+                    <button class="btn btn-sm btn-info" onclick="editUser('${user.username}')">✏️</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteUser('${user.username}')">🗑️</button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="6">Error: ${error.message}</td></tr>`;
+        showToast(`Error loading users: ${error.message}`, 'error');
+    }
 }
 
-//TODO
-function editUser(userId) {
-    showToast(`Edit user ${userId} - UI ready, backend needed`, 'info');
+function showAddUserModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay active';
+    modal.id = 'add-user-modal';
+    
+    modal.innerHTML = `
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Add New User</h3>
+                <button class="modal-close" onclick="closeAddUserModal()">✖</button>
+            </div>
+            <form onsubmit="createUser(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Username *</label>
+                        <input type="text" id="new-username" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email *</label>
+                        <input type="email" id="new-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password *</label>
+                        <input type="password" id="new-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Role *</label>
+                        <select id="new-role" required>
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Max VMs</label>
+                        <input type="number" id="new-maxVMs" value="5">
+                    </div>
+                    <div class="form-group">
+                        <label>Max CPUs</label>
+                        <input type="number" id="new-maxCPU" value="8">
+                    </div>
+                    <div class="form-group">
+                        <label>Max RAM (GB)</label>
+                        <input type="number" id="new-maxRAM" value="16">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Storage (GB)</label>
+                        <input type="number" id="new-maxStorage" value="100">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddUserModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
 }
 
-function deleteUser(userId) {
-    const user = users.find(u => u.id === userId);
-    if (!user) return;
+
+async function createUser(event) {
+    event.preventDefault();
     
-    if (!confirm(`Delete user ${user.username}?`)) return;
+    const userData = {
+        username: document.getElementById('new-username').value,
+        email: document.getElementById('new-email').value,
+        password: document.getElementById('new-password').value,
+        role: document.getElementById('new-role').value,
+        maxVMs: parseInt(document.getElementById('new-maxVMs').value),
+        maxCPU: parseInt(document.getElementById('new-maxCPU').value),
+        maxRAM: parseInt(document.getElementById('new-maxRAM').value),
+        maxStorage: parseInt(document.getElementById('new-maxStorage').value)
+    };
     
-    users = users.filter(u => u.id !== userId);
-    showToast(`✅ User ${user.username} deleted`, 'success');
-    loadUsersTable();
+    try {
+        showToast('Creating user...', 'info');
+        const result = await window.fetchAPI('/users', {
+            method: 'POST',
+            body: JSON.stringify(userData)
+        });
+        
+        if (result.success) {
+            showToast('✅ User created successfully', 'success');
+            closeAddUserModal();
+            await loadUsersTable();
+        } else {
+            showToast(`❌ ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`❌ ${error.message}`, 'error');
+    }
+}
+
+function editUser(username) {
+    showToast(`Edit user ${username} - TO DO :(`, 'info');
+}
+
+function closeAddUserModal() {
+    const modal = document.getElementById('add-user-modal');
+    if (modal) modal.remove();
+}
+
+async function deleteUser(username) {
+    if (!confirm(`Delete user ${username}?`)) return;
+    
+    try {
+        showToast('Deleting user...', 'info');
+        await window.fetchAPI(`/users/${username}`, { method: 'DELETE' });
+        showToast('✅ User deleted', 'success');
+        await loadUsersTable();
+    } catch (error) {
+        showToast(`❌ ${error.message}`, 'error');
+    }
 }
 
 // ==========================================
@@ -211,20 +418,15 @@ function updateBilling() {
             <td>$25.00</td>
         </tr>
         <tr>
-            <td>Bandwidth</td>
-            <td>500 GB</td>
-            <td>$0.05/GB</td>
-            <td>$25.00</td>
-        </tr>
-        <tr>
             <td><strong>Total</strong></td>
             <td colspan="2"></td>
-            <td><strong>$215.00</strong></td>
+            <td><strong>$190.00</strong></td>
         </tr>
     `;
     
     initConsumptionChart();
 }
+
 
 function initConsumptionChart() {
     if (typeof Chart === 'undefined') {
@@ -235,6 +437,12 @@ function initConsumptionChart() {
     const ctx = document.getElementById('consumption-chart');
     if (!ctx) return;
     
+    // Destroy existing chart if it exists
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) {
+        existingChart.destroy();
+    }
+
     try {
         new Chart(ctx.getContext('2d'), {
             type: 'line',
@@ -270,12 +478,11 @@ function generateInvoice() {
 }
 
 // ==========================================
-// Monitoring with Charts
+// Monitoring
 // ==========================================
 
 function initCharts() {
     if (typeof Chart === 'undefined') {
-        console.warn('Chart.js not loaded, retrying in 1 second...');
         setTimeout(initCharts, 1000);
         return;
     }
@@ -305,19 +512,11 @@ function initCharts() {
         }
     };
     
-    try {
-        const cpuChart = document.getElementById('cpu-chart');
-        const memoryChart = document.getElementById('memory-chart');
-        const diskChart = document.getElementById('disk-chart');
-        const networkChart = document.getElementById('network-chart');
-        
-        if (cpuChart) charts.cpu = new Chart(cpuChart, JSON.parse(JSON.stringify(chartConfig)));
-        if (memoryChart) charts.memory = new Chart(memoryChart, JSON.parse(JSON.stringify(chartConfig)));
-        if (diskChart) charts.disk = new Chart(diskChart, JSON.parse(JSON.stringify(chartConfig)));
-        if (networkChart) charts.network = new Chart(networkChart, JSON.parse(JSON.stringify(chartConfig)));
-    } catch (error) {
-        console.error('Error initializing charts:', error);
-    }
+    const ids = ['cpu-chart', 'memory-chart', 'disk-chart', 'network-chart'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) charts[id.replace('-chart', '')] = new Chart(el, JSON.parse(JSON.stringify(chartConfig)));
+    });
 }
 
 function toggleMonitoring() {
@@ -329,7 +528,7 @@ function toggleMonitoring() {
         toggleBtn.innerHTML = '<span>▶️</span> Start';
         showToast('Monitoring stopped', 'info');
     } else {
-        if (!currentVM) {
+        if (!window.currentVM) {  
             showToast('⚠️ Select a VM first', 'warning');
             return;
         }
@@ -339,6 +538,7 @@ function toggleMonitoring() {
         updateMonitoring();
     }
 }
+
 
 async function updateMonitoring() {
     if (!currentVM) return;
@@ -383,89 +583,11 @@ async function loadSystemInfo() {
     systemInfo.textContent = 'Loading system information...';
     
     try {
-        const data = await fetchAPI('/system/info');
+        const data = await window.fetchAPI('/system/info');
         systemInfo.textContent = `${data.nodeInfo}\n\n${data.version}`;
     } catch (error) {
-        // Fallback to static data
-        const staticData = {
-            nodeInfo: `🌍 THOTH CLOUD - Multi-Host Platform
-=================================
-
-🖥️ Main Host (node1)
-• CPU: 32 vCPUs (8 physical)
-• RAM: 64 GB DDR4
-• Storage: 2 TB SSD NVMe
-• Network: 10 Gbps
-• Hypervisor: KVM/libvirt
-
-🖥️ Secondary Host (node2)
-• CPU: 16 vCPUs (4 physical)
-• RAM: 32 GB DDR4
-• Storage: 1 TB SSD
-• Network: 10 Gbps
-• Status: 🟢 Connected
-
-🖥️ Tertiary Host (node3)
-• CPU: 8 vCPUs (2 physical)
-• RAM: 16 GB DDR4
-• Storage: 500 GB SSD
-• Network: 1 Gbps
-• Status: 🟡 Maintenance
-
-📊 Cluster Statistics:
-• Total VMs: 12
-• Active VMs: 7
-• CPU Usage: 65%
-• RAM Usage: 78%
-• Storage Used: 42%`,
-            version: 'THOTH CLOUD v2.0 - PaaS Edition'
-        };
-        
-        systemInfo.textContent = `${staticData.nodeInfo}\n\n${staticData.version}`;
+        systemInfo.textContent = `Error loading system info: ${error.message}`;
     }
-}
-
-//TODO
-// ==========================================
-// Modals Management TODO
-// ==========================================
-
-function showSnapshotModal() {
-    showToast('Create Snapshot - UI ready, backend needed', 'info');
-}
-
-function closeSnapshotModal() {
-    // Modal close logic
-}
-
-function showCloneModal() {
-    showToast('Clone VM - UI ready, backend needed', 'info');
-}
-
-function closeCloneModal() {
-    // Modal close logic
-}
-
-function showConsoleModal() {
-    showToast('VM Console - UI ready, backend needed', 'info');
-}
-
-function closeConsoleModal() {
-    // Modal close logic
-}
-
-function showDeleteVMModal() {
-    showToast('Delete VM - UI ready, backend needed', 'info');
-}
-
-async function createSnapshot(event) {
-    event.preventDefault();
-    showToast('Creating snapshot...', 'info');
-}
-
-async function cloneVM(event) {
-    event.preventDefault();
-    showToast('Cloning VM...', 'info');
 }
 
 // ==========================================
@@ -473,16 +595,17 @@ async function cloneVM(event) {
 // ==========================================
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Initialize charts
-    initCharts();
+    if (!window.authService?.isAuthenticated()) {
+        window.location.href = 'login.html';
+        return;
+    }
     
-    // Load initial data
+    initCharts();
     loadVMs();
     refreshApps();
     loadUsersTable();
     updateBilling();
     
-    // Auto-refresh VMs every 10 seconds
     setInterval(() => {
         if (document.getElementById('view-vms')?.classList.contains('active') ||
             document.getElementById('view-dashboard')?.classList.contains('active')) {
@@ -490,3 +613,30 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }, 10000);
 });
+
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+}
+
+// ==========================================
+// EXPORT FUNCTIONS TO GLOBAL SCOPE
+// ==========================================
+
+window.refreshApps = refreshApps;
+window.deployApp = deployApp;
+window.deleteApp = deleteApp;
+window.loadUsersTable = loadUsersTable;
+window.showAddUserModal = showAddUserModal;
+window.closeAddUserModal = closeAddUserModal;
+window.createUser = createUser;
+window.editUser = editUser;
+window.deleteUser = deleteUser;
+window.updateBilling = updateBilling;
+window.generateInvoice = generateInvoice;
+window.initCharts = initCharts;
+window.toggleMonitoring = toggleMonitoring;
+window.loadSystemInfo = loadSystemInfo;
