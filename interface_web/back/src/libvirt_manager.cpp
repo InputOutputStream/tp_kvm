@@ -3,29 +3,24 @@
 #include <iostream>
 
 LibvirtManager::LibvirtManager() 
-    : conn(nullptr), useRemote(false) {}
+    : conn(nullptr){}
 
 LibvirtManager::~LibvirtManager() {
     disconnect();
 }
 
-bool LibvirtManager::connect(bool remote, const std::string& host, const std::string& user) {
+bool LibvirtManager::connect(const std::string& host, const std::string& user) {
     if (conn != nullptr) {
-        return true; // Already connected
+        return true; 
     }
 
-    useRemote = remote;
     remoteHost = host;
     username = user;
 
     std::string uri;
-    if (useRemote) {
-        uri = "qemu+ssh://" + username + "@" + remoteHost + "/system";
-        std::cout << "Connecting to: " << uri << std::endl;
-    } else {
-        uri = "qemu:///system";
-    }
-
+    
+    uri = "qemu+ssh://" + username + "@" + remoteHost + "/system";
+    std::cout << "Connecting to: " << uri << std::endl;
     conn = virConnectOpen(uri.c_str());
 
     if (conn == nullptr) {

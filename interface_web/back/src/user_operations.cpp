@@ -1,6 +1,5 @@
 #include "../include/user_operations.hpp"
 #include "../include/utils.hpp"
-#include "../include/vm_lookup.hpp"
 #include <openssl/sha.h>
 #include <iomanip>
 
@@ -273,17 +272,6 @@ json UserOperations::getUser(const std::string& username) {
     return result;
 }
 
-json UserOperations::authUsers(const std::vector<std::string>& creds)
-{
-    json result;
-    result["success"] = false;
-    
-
-
-
-    result["error"] = "User not found";
-    return result;
-}
 
 json UserOperations::updateUser(const std::string& username, const json& updates) {
     json result;

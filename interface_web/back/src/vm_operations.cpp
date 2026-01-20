@@ -2,6 +2,7 @@
 #include "../include/utils.hpp"
 #include "../include/validation.hpp"
 #include "../include/remote_executor.hpp"
+#include "../include/host_manager.hpp"
 
 #include <regex>
 #include <fstream>
@@ -11,7 +12,7 @@
 #include <sys/stat.h>
 #include <libvirt/virterror.h>
 
-VMOperations::VMOperations(virConnectPtr connection) : conn(connection) {}
+VMOperations::VMOperations(virConnectPtr connection, HostManager *hostMgr) : conn(connection), hostManager(hostMgr){}
 
 std::string VMOperations::getStateString(int state) {
     const char* states[] = {"no state", "running", "blocked", "paused", 
@@ -336,27 +337,96 @@ bool VMOperations::shutdownVM(const std::string& name) {
     return result >= 0;
 }
 
+// ==========================================
+// RESOURCE MANAGEMENT
+// ==========================================
 
+VMOperations::HostSelection VMOperations::selectOptimalHost(const json& vmParams) {
+    HostSelection result = {"", nullptr};
+    
+    if (!vmParams.contains("hostManager")) {
+        result.connection = conn;
+        return result;
+    }
+    
+    int memory = vmParams["memory"];
+    int vcpus = vmParams["vcpus"];
+    int disk = vmParams["disk"];
+    long long diskBytes = (long long)disk * 1024 * 1024 * 1024;
+    
+    json availability = hostManager->checkResourceAvailability(memory, vcpus, diskBytes);
+    
+    if (!availability["available"].get<bool>()) {
+        logDeploymentFailure(vmParams, availability);
+        return result;
+    }
+    
+    std::string bestHost = hostManager->findBestHost(memory, vcpus, diskBytes);
+    if (bestHost.empty()) {
+        fprintf(stderr, "❌ No suitable host found\n");
+        return result;
+    }
+    
+    fprintf(stdout, "✅ Selected host: %s\n", bestHost.c_str());
+    
+    virConnectPtr hostConn = hostManager->getConnection(bestHost);
+    if (!hostConn) {
+        fprintf(stderr, "❌ Failed to get connection to host: %s\n", bestHost.c_str());
+        return result;
+    }
+    
+    result.hostname = bestHost;
+    result.connection = hostConn;
+    return result;
+}
 
-bool VMOperations::deployVM(const json& vmParams) {
-    // Create remote executor
-    RemoteExec::RemoteExecutor remoteExec(conn);
+bool VMOperations::logDeploymentFailure(const json& vmParams, const json& availability) {
+    int memory = vmParams["memory"];
+    int vcpus = vmParams["vcpus"];
+    int disk = vmParams["disk"];
     
-    fprintf(stdout, "📡 Target Host: %s\n\n", remoteExec.getHostInfo().c_str());
+    fprintf(stderr, "❌ INSUFFICIENT RESOURCES ACROSS ALL HOSTS\n");
+    fprintf(stderr, "Required: %d MB RAM, %d vCPUs, %d GB Disk\n", memory, vcpus, disk);
+    fprintf(stderr, "\nAvailable on hosts:\n");
     
-    // ==========================================
-    // STEP 1: VALIDATE CONNECTION
-    // ==========================================
+    for (const auto& host : availability["hosts"]) {
+        fprintf(stderr, "  • %s: %lu MB RAM, %d vCPUs, %lld GB Disk\n",
+               host["hostname"].get<std::string>().c_str(),
+               host["availableMemory"].get<unsigned long>(),
+               host["availableCPUs"].get<int>(),
+               host["availableDisk"].get<long long>());
+    }
+    
+    std::ofstream logFile("/var/log/thoth-cloud/deployment-failures.log", std::ios::app);
+    if (logFile.is_open()) {
+        auto now = std::time(nullptr);
+        logFile << std::ctime(&now) << " - INSUFFICIENT RESOURCES\n";
+        logFile << "  VM: " << vmParams["hostname"] << "\n";
+        logFile << "  Required: " << memory << "MB, " << vcpus << " vCPUs, " << disk << "GB\n";
+        logFile << "  User: " << vmParams.value("owner", "unknown") << "\n\n";
+    }
+    
+    return false;
+}
+
+// ==========================================
+// VALIDATION METHODS
+// ==========================================
+
+bool VMOperations::validateConnection() {
+    fprintf(stdout, "\n🔍 Validating libvirt connection...\n");
+    
     auto connResult = Validation::SystemValidator::checkLibvirtConnection(conn);
     if (!connResult.valid) {
         fprintf(stderr, "❌ %s\n", connResult.error.c_str());
         return false;
     }
-    fprintf(stdout, "✅ Libvirt connection verified\n");
     
-    // ==========================================
-    // STEP 2: VALIDATE INPUT PARAMETERS
-    // ==========================================
+    fprintf(stdout, "✅ Libvirt connection verified\n");
+    return true;
+}
+
+bool VMOperations::validateInputParameters(const json& vmParams) {
     fprintf(stdout, "\n🔍 Validating input parameters...\n");
     
     auto validationResult = Validation::Validator::validateDeploymentParams(vmParams);
@@ -365,28 +435,15 @@ bool VMOperations::deployVM(const json& vmParams) {
         return false;
     }
     
-    // Show warnings
     for (const auto& warning : validationResult.warnings) {
         fprintf(stdout, "⚠️  Warning: %s\n", warning.c_str());
     }
     
     fprintf(stdout, "✅ Input parameters validated\n");
-    
-    // Extract parameters
-    std::string hostname = vmParams["hostname"];
-    std::string actualHostname = vmParams["owner"].get<std::string>() + "-" + hostname;
+    return true;
+}
 
-    int memory = vmParams["memory"];
-    int vcpus = vmParams["vcpus"];
-    int disk = vmParams["disk"];
-    std::string username = vmParams.value("username", "ubuntu");
-    std::string authMethod = vmParams.value("authMethod", "password");
-    std::string password = vmParams.value("password", "");
-    std::string sshKey = vmParams.value("sshKey", "");
-    
-    // ==========================================
-    // STEP 3: CHECK VM NAME AVAILABILITY
-    // ==========================================
+bool VMOperations::validateVMNameAvailability(const std::string& hostname) {
     fprintf(stdout, "\n🔍 Checking VM name availability...\n");
     
     auto nameResult = Validation::SystemValidator::checkVMNameAvailable(conn, hostname);
@@ -395,11 +452,12 @@ bool VMOperations::deployVM(const json& vmParams) {
         fprintf(stderr, "   Suggestion: Choose a different hostname or delete the existing VM\n");
         return false;
     }
-    fprintf(stdout, "✅ VM name '%s' is available\n", hostname.c_str());
     
-    // ==========================================
-    // STEP 4: CHECK REQUIRED DIRECTORIES (REMOTE)
-    // ==========================================
+    fprintf(stdout, "✅ VM name '%s' is available\n", hostname.c_str());
+    return true;
+}
+
+bool VMOperations::validateRemoteDirectories(RemoteExec::RemoteExecutor& remoteExec) {
     fprintf(stdout, "\n🔍 Checking required directories on target host...\n");
     
     std::vector<std::string> requiredDirs = {
@@ -425,20 +483,17 @@ bool VMOperations::deployVM(const json& vmParams) {
         fprintf(stderr, "   sudo chown -R libvirt-qemu:kvm /var/lib/libvirt/images\n");
         return false;
     }
-    fprintf(stdout, "✅ All required directories exist on target host\n");
     
-    // ==========================================
-    // STEP 5: CHECK REQUIRED TOOLS (REMOTE)
-    // ==========================================
+    fprintf(stdout, "✅ All required directories exist on target host\n");
+    return true;
+}
+
+bool VMOperations::validateRemoteTools(RemoteExec::RemoteExecutor& remoteExec) {
     fprintf(stdout, "\n🔍 Checking required tools on target host...\n");
     
-    std::vector<std::string> requiredTools = {
-        "qemu-img",
-        "genisoimage",
-        "mkpasswd"
-    };
-    
+    std::vector<std::string> requiredTools = {"qemu-img", "genisoimage", "mkpasswd"};
     std::vector<std::string> missingTools;
+    
     for (const auto& tool : requiredTools) {
         if (!remoteExec.commandExists(tool)) {
             missingTools.push_back(tool);
@@ -454,11 +509,12 @@ bool VMOperations::deployVM(const json& vmParams) {
         fprintf(stderr, "   sudo apt-get install -y qemu-utils genisoimage whois\n");
         return false;
     }
-    fprintf(stdout, "✅ All required tools are installed on target host\n");
     
-    // ==========================================
-    // STEP 6: VALIDATE BASE IMAGE (REMOTE)
-    // ==========================================
+    fprintf(stdout, "✅ All required tools are installed on target host\n");
+    return true;
+}
+
+bool VMOperations::validateBaseImage(RemoteExec::RemoteExecutor& remoteExec) {
     fprintf(stdout, "\n🔍 Validating base image on target host...\n");
     
     std::string baseImagePath = "/var/lib/libvirt/images/baseimg/ubuntu-22.04-server-cloudimg-amd64.img";
@@ -481,38 +537,41 @@ bool VMOperations::deployVM(const json& vmParams) {
     }
     
     fprintf(stdout, "✅ Base image is valid: %s\n", baseImagePath.c_str());
-    
-    // ==========================================
-    // STEP 7: CHECK DISK SPACE (REMOTE)
-    // ==========================================
+    return true;
+}
+
+bool VMOperations::validateDiskSpace(RemoteExec::RemoteExecutor& remoteExec, int diskGB) {
     fprintf(stdout, "\n🔍 Checking available disk space on target host...\n");
     
-    long long requiredBytes = (long long)disk * 1024 * 1024 * 1024;  // Convert GB to bytes
-    requiredBytes += 1024 * 1024 * 1024;  // Add 1GB buffer for cloud-init ISO, etc.
+    long long requiredBytes = (long long)diskGB * 1024 * 1024 * 1024;
+    requiredBytes += 1024 * 1024 * 1024;  // Add 1GB buffer
     
     long long availableBytes = remoteExec.getAvailableDiskSpace("/var/lib/libvirt/images");
     
     if (availableBytes < 0) {
         fprintf(stdout, "⚠️  Could not verify disk space. Proceeding with deployment...\n");
-    } else if (availableBytes < requiredBytes) {
+        return true;
+    }
+    
+    if (availableBytes < requiredBytes) {
         fprintf(stderr, "❌ Insufficient disk space on target host.\n");
         fprintf(stderr, "   Required: %.2f GB\n", requiredBytes / (1024.0*1024.0*1024.0));
         fprintf(stderr, "   Available: %.2f GB\n", availableBytes / (1024.0*1024.0*1024.0));
         return false;
-    } else {
-        fprintf(stdout, "✅ Sufficient disk space available on target host\n");
-        fprintf(stdout, "   Available: %.2f GB\n", availableBytes / (1024.0*1024.0*1024.0));
-        
-        // Warn if less than 10GB free after allocation
-        long long remainingBytes = availableBytes - requiredBytes;
-        if (remainingBytes < 10LL * 1024 * 1024 * 1024) {
-            fprintf(stdout, "⚠️  Warning: Less than 10GB will remain after allocation\n");
-        }
     }
     
-    // ==========================================
-    // STEP 8: CHECK NETWORK
-    // ==========================================
+    fprintf(stdout, "✅ Sufficient disk space available on target host\n");
+    fprintf(stdout, "   Available: %.2f GB\n", availableBytes / (1024.0*1024.0*1024.0));
+    
+    long long remainingBytes = availableBytes - requiredBytes;
+    if (remainingBytes < 10LL * 1024 * 1024 * 1024) {
+        fprintf(stdout, "⚠️  Warning: Less than 10GB will remain after allocation\n");
+    }
+    
+    return true;
+}
+
+bool VMOperations::validateNetwork() {
     fprintf(stdout, "\n🔍 Checking default network...\n");
     
     auto networkResult = Validation::SystemValidator::checkNetworkAvailable(conn, "default");
@@ -520,263 +579,384 @@ bool VMOperations::deployVM(const json& vmParams) {
         fprintf(stderr, "❌ %s\n", networkResult.error.c_str());
         return false;
     }
+    
     fprintf(stdout, "✅ Network 'default' is active on target host\n");
+    return true;
+}
+
+// ==========================================
+// CLOUD-INIT METHODS
+// ==========================================
+
+VMOperations::CloudInitConfig VMOperations::createCloudInitConfig(const json& vmParams) {
+    CloudInitConfig config;
     
-    // ==========================================
-    // STEP 9: BEGIN DEPLOYMENT
-    // ==========================================
-    fprintf(stdout, "📋 Configuration:\n");
-    fprintf(stdout, "   Hostname: %s\n", hostname.c_str());
-    fprintf(stdout, "   Memory: %d MB\n", memory);
-    fprintf(stdout, "   vCPUs: %d\n", vcpus);
-    fprintf(stdout, "   Disk: %d GB\n", disk);
-    fprintf(stdout, "   Username: %s\n", username.c_str());
-    fprintf(stdout, "   Auth: %s\n", authMethod.c_str());
+    std::string hostname = vmParams["hostname"];
+    std::string actualHostname = vmParams["owner"].get<std::string>() + "-" + hostname;
+    std::string username = vmParams.value("username", "ubuntu");
+    std::string authMethod = vmParams.value("authMethod", "password");
+    std::string sshKey = vmParams.value("sshKey", "");
+    
+    // Create meta-data
+    std::stringstream metaData;
+    metaData << "instance-id: " << hostname << "\n"
+             << "local-hostname: " << hostname << "\n";
+    
+    // Create user-data
+    std::stringstream userData;
+    userData << "#cloud-config\n"
+             << "hostname: " << actualHostname << "\n"
+             << "fqdn: " << hostname << ".local\n"
+             << "manage_etc_hosts: true\n\n"
+             << "users:\n"
+             << "  - name: " << username << "\n"
+             << "    sudo: ALL=(ALL) NOPASSWD:ALL\n"
+             << "    groups: users, admin\n"
+             << "    shell: /bin/bash\n";
+    
+    if (authMethod == "ssh-key" && !sshKey.empty()) {
+        userData << "    ssh_authorized_keys:\n"
+                 << "      - " << sshKey << "\n";
+    }
+    
+    userData << "\n"
+             << "ssh_pwauth: " << (authMethod == "password" ? "true" : "false") << "\n"
+             << "disable_root: false\n"
+             << "chpasswd:\n"
+             << "  expire: false\n\n"
+             << "package_update: true\n"
+             << "package_upgrade: false\n\n"
+             << "packages:\n"
+             << "  - qemu-guest-agent\n"
+             << "  - cloud-init\n\n"
+             << "runcmd:\n"
+             << "  - systemctl enable qemu-guest-agent\n"
+             << "  - systemctl start qemu-guest-agent\n"
+             << "  - echo 'Cloud-init setup complete' > /var/log/cloudinit-done\n\n"
+             << "power_state:\n"
+             << "  mode: reboot\n"
+             << "  timeout: 30\n"
+             << "  condition: true\n";
+    
+    config.metaData = metaData.str();
+    config.userData = userData.str();
+    
+    return config;
+}
+
+std::string VMOperations::hashPassword(RemoteExec::RemoteExecutor& remoteExec, 
+                                       const std::string& password) {
+    std::string hashCmd = "mkpasswd --method=SHA-512 --rounds=4096 '" + password + "'";
+    auto hashResult = remoteExec.execute(hashCmd);
+    
+    if (!hashResult.success()) {
+        return "";
+    }
+    
+    std::string hashedPassword = hashResult.output;
+    hashedPassword.erase(hashedPassword.find_last_not_of("\n\r") + 1);
+    return hashedPassword;
+}
+
+bool VMOperations::writeCloudInitFiles(RemoteExec::RemoteExecutor& remoteExec,
+                                       const std::string& hostname,
+                                       const CloudInitConfig& config) {
+    fprintf(stdout, "Step 1/7: Creating cloud-init configuration...\n");
+    
+    std::string cloudInitDir = "/tmp/cloudinit-" + hostname;
+    
+    auto mkdirResult = remoteExec.execute("mkdir -p " + cloudInitDir);
+    if (!mkdirResult.success()) {
+        fprintf(stderr, "   ❌ Failed to create temp directory on target host\n");
+        return false;
+    }
+    
+    std::string writeMetaCmd = "cat > " + cloudInitDir + "/meta-data << 'EOF'\n" + 
+                               config.metaData + "\nEOF";
+    std::string writeUserCmd = "cat > " + cloudInitDir + "/user-data << 'EOF'\n" + 
+                               config.userData + "\nEOF";
+    
+    auto writeMetaResult = remoteExec.execute(writeMetaCmd);
+    auto writeUserResult = remoteExec.execute(writeUserCmd);
+    
+    if (!writeMetaResult.success() || !writeUserResult.success()) {
+        fprintf(stderr, "   ❌ Failed to write cloud-init files on target host\n");
+        return false;
+    }
+    
+    fprintf(stdout, "   ✅ Cloud-init configuration created\n");
+    return true;
+}
+
+bool VMOperations::createCloudInitISO(RemoteExec::RemoteExecutor& remoteExec,
+                                      const std::string& hostname) {
+    fprintf(stdout, "Step 2/7: Creating cloud-init ISO...\n");
+    
+    std::string cloudInitDir = "/tmp/cloudinit-" + hostname;
+    std::string cloudInitPath = "/var/lib/libvirt/images/cloud-init-iso/" + hostname + "-cloudinit.iso";
+    
+    std::string createIsoCmd = "genisoimage -output " + cloudInitPath + 
+                               " -volid cidata -joliet -rock " + 
+                               cloudInitDir + "/user-data " + 
+                               cloudInitDir + "/meta-data 2>&1";
+    
+    auto isoResult = remoteExec.execute(createIsoCmd);
+    
+    if (!isoResult.success()) {
+        fprintf(stderr, "   ❌ Failed to create cloud-init ISO: %s\n", isoResult.output.c_str());
+        return false;
+    }
+    
+    fprintf(stdout, "   ✅ Cloud-init ISO created\n");
+    
+    // Clean up temp directory
+    remoteExec.execute("rm -rf " + cloudInitDir);
+    
+    return true;
+}
+
+// ==========================================
+// DISK OPERATIONS
+// ==========================================
+
+// This will be updated for ultiple image support
+// For now, chill with ubuntu
+
+bool VMOperations::copyBaseImage(RemoteExec::RemoteExecutor& remoteExec,
+                                 const std::string& hostname) {
+    fprintf(stdout, "Step 3/7: Copying base cloud image...\n");
+    
+    std::string baseImagePath = "/var/lib/libvirt/images/baseimg/ubuntu-22.04-server-cloudimg-amd64.img";
+    std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
+    
+    std::string copyCmd = "cp " + baseImagePath + " " + diskPath;
+    auto copyResult = remoteExec.execute(copyCmd);
+    
+    if (!copyResult.success()) {
+        fprintf(stderr, "   ❌ Failed to copy base image: %s\n", copyResult.output.c_str());
+        return false;
+    }
+    
+    fprintf(stdout, "   ✅ Base image copied\n");
+    return true;
+}
+
+bool VMOperations::resizeDisk(RemoteExec::RemoteExecutor& remoteExec,
+                              const std::string& hostname, int diskGB) {
+    fprintf(stdout, "📝 Step 4/7: Resizing disk to %dGB...\n", diskGB);
+    
+    std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
+    std::string resizeCmd = "qemu-img resize " + diskPath + " " + std::to_string(diskGB) + "G";
+    
+    auto resizeResult = remoteExec.execute(resizeCmd);
+    
+    if (!resizeResult.success()) {
+        fprintf(stderr, "   ❌ Failed to resize disk: %s\n", resizeResult.output.c_str());
+        return false;
+    }
+    
+    fprintf(stdout, "   ✅ Disk resized\n");
+    return true;
+}
+
+// ==========================================
+// VM CREATION
+// ==========================================
+
+std::string VMOperations::generateDomainXML(const json& vmParams) {
+    std::string hostname = vmParams["hostname"];
+    int memory = vmParams["memory"];
+    int vcpus = vmParams["vcpus"];
+    
+    std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
+    std::string cloudInitPath = "/var/lib/libvirt/images/cloud-init-iso/" + hostname + "-cloudinit.iso";
+    
+    std::stringstream xmlConfig;
+    xmlConfig << "<domain type='kvm'>"
+              << "  <name>" << hostname << "</name>"
+              << "  <memory unit='MiB'>" << memory << "</memory>"
+              << "  <currentMemory unit='MiB'>" << memory << "</currentMemory>"
+              << "  <vcpu placement='static'>" << vcpus << "</vcpu>"
+              << "  <os>"
+              << "    <type arch='x86_64' machine='pc'>hvm</type>"
+              << "    <boot dev='hd'/>"
+              << "  </os>"
+              << "  <features>"
+              << "    <acpi/>"
+              << "    <apic/>"
+              << "  </features>"
+              << "  <cpu mode='host-passthrough'/>"
+              << "  <clock offset='utc'/>"
+              << "  <on_poweroff>destroy</on_poweroff>"
+              << "  <on_reboot>restart</on_reboot>"
+              << "  <on_crash>destroy</on_crash>"
+              << "  <devices>"
+              << "    <emulator>/usr/bin/qemu-system-x86_64</emulator>"
+              << "    <disk type='file' device='disk'>"
+              << "      <driver name='qemu' type='qcow2'/>"
+              << "      <source file='" << diskPath << "'/>"
+              << "      <target dev='vda' bus='virtio'/>"
+              << "    </disk>"
+              << "    <disk type='file' device='cdrom'>"
+              << "      <driver name='qemu' type='raw'/>"
+              << "      <source file='" << cloudInitPath << "'/>"
+              << "      <target dev='hdc' bus='ide'/>"
+              << "      <readonly/>"
+              << "    </disk>"
+              << "    <interface type='network'>"
+              << "      <source network='default'/>"
+              << "      <model type='virtio'/>"
+              << "    </interface>"
+              << "    <serial type='pty'>"
+              << "      <target type='isa-serial' port='0'>"
+              << "        <model name='isa-serial'/>"
+              << "      </target>"
+              << "    </serial>"
+              << "    <console type='pty'>"
+              << "      <target type='serial' port='0'/>"
+              << "    </console>"
+              << "    <channel type='unix'>"
+              << "      <target type='virtio' name='org.qemu.guest_agent.0'/>"
+              << "    </channel>"
+              << "    <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'/>"
+              << "  </devices>"
+              << "</domain>";
+    
+    return xmlConfig.str();
+}
+
+bool VMOperations::startVM(virDomainPtr domain) {
+    fprintf(stdout, "Step 7/7: Starting VM...\n");
+    
+    if (virDomainCreate(domain) < 0) {
+        virErrorPtr err = virGetLastError();
+        if (err) {
+            fprintf(stderr, "   ❌ Failed to start domain: %s\n", err->message);
+        }
+        return false;
+    }
+    
+    fprintf(stdout, "   ✅ VM started successfully\n\n");
+    return true;
+}
+
+virDomainPtr VMOperations::defineVM(const std::string& xml) {
+    fprintf(stdout, "📝 Step 6/7: Defining VM in libvirt...\n");
+    
+    virDomainPtr domain = virDomainDefineXML(conn, xml.c_str());
+    if (!domain) {
+        virErrorPtr err = virGetLastError();
+        if (err) {
+            fprintf(stderr, "   ❌ Failed to define domain: %s\n", err->message);
+        }
+        return nullptr;
+    }
+    
+    fprintf(stdout, "   ✅ VM defined in libvirt\n");
+    return domain;
+}
+
+
+// ==========================================
+// HELPER METHODS
+// ==========================================
+
+void VMOperations::printConfiguration(const json& vmParams) {
+    fprintf(stdout, "\n📋 Configuration:\n");
+    fprintf(stdout, "   Hostname: %s\n", vmParams["hostname"].get<std::string>().c_str());
+    fprintf(stdout, "   Memory: %d MB\n", vmParams["memory"].get<int>());
+    fprintf(stdout, "   vCPUs: %d\n", vmParams["vcpus"].get<int>());
+    fprintf(stdout, "   Disk: %d GB\n", vmParams["disk"].get<int>());
+    fprintf(stdout, "   Username: %s\n", vmParams.value("username", "ubuntu").c_str());
+    fprintf(stdout, "   Auth: %s\n", vmParams.value("authMethod", "password").c_str());
     fprintf(stdout, "\n");
-    
+}
+
+// ==========================================
+// MAIN DEPLOYMENT METHOD
+// ==========================================
+
+bool VMOperations::deployVM(const json& vmParams) {
     try {
-        // Paths on the target host
-        std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
-        std::string cloudInitPath = "/var/lib/libvirt/images/cloud-init-iso/" + hostname + "-cloudinit.iso";
-        
-        // Step 1: Create cloud-init configuration
-        fprintf(stdout, "📝 Step 1/7: Creating cloud-init configuration...\n");
-        
-        std::string cloudInitDir = "/tmp/cloudinit-" + hostname;
-        
-        // Create directory on target host
-        auto mkdirResult = remoteExec.execute("mkdir -p " + cloudInitDir);
-        if (!mkdirResult.success()) {
-            fprintf(stderr, "   ❌ Failed to create temp directory on target host\n");
+        // TO DO: Add Multihost
+    
+        // Select optimal host
+        auto hostSelection = selectOptimalHost(vmParams);
+        if (!hostSelection.connection) {
             return false;
         }
         
-        // Create meta-data file
-        std::stringstream metaData;
-        metaData << "instance-id: " << hostname << "\n"
-                 << "local-hostname: " << hostname << "\n";
+        // Update connection if host was selected
+        if (!hostSelection.hostname.empty()) {
+            conn = hostSelection.connection;
+        }
         
-        // Create user-data file
-        std::stringstream userData;
-        userData << "#cloud-config\n"
-                 << "hostname: " << actualHostname << "\n"
-                 << "fqdn: " << hostname << ".local\n"
-                 << "manage_etc_hosts: true\n\n"
-                 << "users:\n"
-                 << "  - name: " << username << "\n"
-                 << "    sudo: ALL=(ALL) NOPASSWD:ALL\n"
-                 << "    groups: users, admin\n"
-                 << "    shell: /bin/bash\n";
+        // Create remote executor
+        RemoteExec::RemoteExecutor remoteExec(conn);
+        fprintf(stdout, "📡 Target Host: %s\n\n", remoteExec.getHostInfo().c_str());
         
-        if (authMethod == "password" && !password.empty()) {
-            // Generate password hash on target host
-            std::string hashCmd = "mkpasswd --method=SHA-512 --rounds=4096 '" + password + "'";
-            auto hashResult = remoteExec.execute(hashCmd);
+        // Validation phase
+        if (!validateConnection()) return false;
+        if (!validateInputParameters(vmParams)) return false;
+        
+        std::string hostname = vmParams["hostname"];
+        
+        if (!validateVMNameAvailability(hostname)) return false;
+        if (!validateRemoteDirectories(remoteExec)) return false;
+        if (!validateRemoteTools(remoteExec)) return false;
+        if (!validateBaseImage(remoteExec)) return false;
+        if (!validateDiskSpace(remoteExec, vmParams["disk"])) return false;
+        if (!validateNetwork()) return false;
+        
+        // Print configuration
+        printConfiguration(vmParams);
+        
+        // Create cloud-init configuration
+        auto cloudInitConfig = createCloudInitConfig(vmParams);
+        
+        // Handle password hashing if needed
+        if (vmParams.value("authMethod", "password") == "password" && 
+            vmParams.contains("password") && !vmParams["password"].get<std::string>().empty()) {
             
-            if (!hashResult.success()) {
+            std::string hashedPassword = hashPassword(remoteExec, vmParams["password"]);
+            if (hashedPassword.empty()) {
                 fprintf(stderr, "   ❌ Failed to generate password hash on target host\n");
                 return false;
             }
             
-            std::string hashedPassword = hashResult.output;
-            hashedPassword.erase(hashedPassword.find_last_not_of("\n\r") + 1);
-            
-            userData << "    passwd: " << hashedPassword << "\n"
-                     << "    lock_passwd: false\n";
-        } else if (authMethod == "ssh-key" && !sshKey.empty()) {
-            userData << "    ssh_authorized_keys:\n"
-                     << "      - " << sshKey << "\n";
-        }
-        
-        userData << "\n"
-                 << "ssh_pwauth: " << (authMethod == "password" ? "true" : "false") << "\n"
-                 << "disable_root: false\n"
-                 << "chpasswd:\n"
-                 << "  expire: false\n\n"
-                 << "package_update: true\n"
-                 << "package_upgrade: false\n\n"
-                 << "packages:\n"
-                 << "  - qemu-guest-agent\n"
-                 << "  - cloud-init\n\n"
-                 << "runcmd:\n"
-                 << "  - systemctl enable qemu-guest-agent\n"
-                 << "  - systemctl start qemu-guest-agent\n"
-                 << "  - echo 'Cloud-init setup complete' > /var/log/cloudinit-done\n\n"
-                 << "power_state:\n"
-                 << "  mode: reboot\n"
-                 << "  timeout: 30\n"
-                 << "  condition: true\n";
-        
-        // Write files to target host using echo and cat
-        std::string metaDataContent = metaData.str();
-        std::string userDataContent = userData.str();
-        
-        // Escape single quotes in content
-        auto escapeSingleQuotes = [](const std::string& str) {
-            std::string escaped = str;
-            size_t pos = 0;
-            while ((pos = escaped.find("'", pos)) != std::string::npos) {
-                escaped.replace(pos, 1, "'\\''");
-                pos += 4;
+            // Insert password into user-data
+            size_t pos = cloudInitConfig.userData.find("    shell: /bin/bash\n");
+            if (pos != std::string::npos) {
+                std::string passwordSection = "    passwd: " + hashedPassword + "\n" +
+                                             "    lock_passwd: false\n";
+                cloudInitConfig.userData.insert(pos + 24, passwordSection);
             }
-            return escaped;
-        };
-        
-        std::string writeMetaCmd = "cat > " + cloudInitDir + "/meta-data << 'EOF'\n" + metaDataContent + "\nEOF";
-        std::string writeUserCmd = "cat > " + cloudInitDir + "/user-data << 'EOF'\n" + userDataContent + "\nEOF";
-        
-        auto writeMetaResult = remoteExec.execute(writeMetaCmd);
-        auto writeUserResult = remoteExec.execute(writeUserCmd);
-        
-        if (!writeMetaResult.success() || !writeUserResult.success()) {
-            fprintf(stderr, "   ❌ Failed to write cloud-init files on target host\n");
-            return false;
         }
         
-        fprintf(stdout, "   ✅ Cloud-init configuration created\n");
+        // Deployment phase
+        if (!writeCloudInitFiles(remoteExec, hostname, cloudInitConfig)) return false;
+        if (!createCloudInitISO(remoteExec, hostname)) return false;
+        if (!copyBaseImage(remoteExec, hostname)) return false;
+        if (!resizeDisk(remoteExec, hostname, vmParams["disk"])) return false;
         
-        // Step 2: Create cloud-init ISO
-        fprintf(stdout, "📝 Step 2/7: Creating cloud-init ISO...\n");
-        
-        std::string createIsoCmd = "genisoimage -output " + cloudInitPath + 
-                                   " -volid cidata -joliet -rock " + 
-                                   cloudInitDir + "/user-data " + 
-                                   cloudInitDir + "/meta-data 2>&1";
-        auto isoResult = remoteExec.execute(createIsoCmd);
-        
-        if (!isoResult.success()) {
-            fprintf(stderr, "   ❌ Failed to create cloud-init ISO: %s\n", isoResult.output.c_str());
-            return false;
-        }
-        
-        fprintf(stdout, "   ✅ Cloud-init ISO created\n");
-        
-        // Clean up temp directory
-        remoteExec.execute("rm -rf " + cloudInitDir);
-        
-        // Step 3: Copy base image
-        fprintf(stdout, "📝 Step 3/7: Copying base cloud image...\n");
-        
-        std::string copyCmd = "cp " + baseImagePath + " " + diskPath;
-        auto copyResult = remoteExec.execute(copyCmd);
-        
-        if (!copyResult.success()) {
-            fprintf(stderr, "   ❌ Failed to copy base image: %s\n", copyResult.output.c_str());
-            return false;
-        }
-        
-        fprintf(stdout, "   ✅ Base image copied\n");
-        
-        // Step 4: Resize disk
-        fprintf(stdout, "📝 Step 4/7: Resizing disk to %dGB...\n", disk);
-        
-        std::string resizeCmd = "qemu-img resize " + diskPath + " " + std::to_string(disk) + "G";
-        auto resizeResult = remoteExec.execute(resizeCmd);
-        
-        if (!resizeResult.success()) {
-            fprintf(stderr, "   ❌ Failed to resize disk: %s\n", resizeResult.output.c_str());
-            return false;
-        }
-        
-        fprintf(stdout, "   ✅ Disk resized\n");
-        
-        // Step 5: Create domain XML
-        fprintf(stdout, "📝 Step 5/7: Creating VM definition...\n");
-        
-        std::stringstream xmlConfig;
-        xmlConfig << "<domain type='kvm'>"
-                  << "  <name>" << hostname << "</name>"
-                  << "  <memory unit='MiB'>" << memory << "</memory>"
-                  << "  <currentMemory unit='MiB'>" << memory << "</currentMemory>"
-                  << "  <vcpu placement='static'>" << vcpus << "</vcpu>"
-                  << "  <os>"
-                  << "    <type arch='x86_64' machine='pc'>hvm</type>"
-                  << "    <boot dev='hd'/>"
-                  << "  </os>"
-                  << "  <features>"
-                  << "    <acpi/>"
-                  << "    <apic/>"
-                  << "  </features>"
-                  << "  <cpu mode='host-passthrough'/>"
-                  << "  <clock offset='utc'/>"
-                  << "  <on_poweroff>destroy</on_poweroff>"
-                  << "  <on_reboot>restart</on_reboot>"
-                  << "  <on_crash>destroy</on_crash>"
-                  << "  <devices>"
-                  << "    <emulator>/usr/bin/qemu-system-x86_64</emulator>"
-                  << "    <disk type='file' device='disk'>"
-                  << "      <driver name='qemu' type='qcow2'/>"
-                  << "      <source file='" << diskPath << "'/>"
-                  << "      <target dev='vda' bus='virtio'/>"
-                  << "    </disk>"
-                  << "    <disk type='file' device='cdrom'>"
-                  << "      <driver name='qemu' type='raw'/>"
-                  << "      <source file='" << cloudInitPath << "'/>"
-                  << "      <target dev='hdc' bus='ide'/>"
-                  << "      <readonly/>"
-                  << "    </disk>"
-                  << "    <interface type='network'>"
-                  << "      <source network='default'/>"
-                  << "      <model type='virtio'/>"
-                  << "    </interface>"
-                  << "    <serial type='pty'>"
-                  << "      <target type='isa-serial' port='0'>"
-                  << "        <model name='isa-serial'/>"
-                  << "      </target>"
-                  << "    </serial>"
-                  << "    <console type='pty'>"
-                  << "      <target type='serial' port='0'/>"
-                  << "    </console>"
-                  << "    <channel type='unix'>"
-                  << "      <target type='virtio' name='org.qemu.guest_agent.0'/>"
-                  << "    </channel>"
-                  << "    <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'/>"
-                  << "  </devices>"
-                  << "</domain>";
-        
-        std::string xml = xmlConfig.str();
-        
+        // Create and start VM
+        fprintf(stdout, "Step 5/7: Creating VM definition...\n");
+        std::string xml = generateDomainXML(vmParams);
         fprintf(stdout, "   ✅ VM definition created\n");
         
-        // Step 6: Define the domain
-        fprintf(stdout, "📝 Step 6/7: Defining VM in libvirt...\n");
+        virDomainPtr domain = defineVM(xml);
+        if (!domain) return false;
         
-        virDomainPtr domain = virDomainDefineXML(conn, xml.c_str());
-        if (!domain) {
-            virErrorPtr err = virGetLastError();
-            if (err) {
-                fprintf(stderr, "   ❌ Failed to define domain: %s\n", err->message);
-            }
-            return false;
-        }
-        
-        fprintf(stdout, "   ✅ VM defined in libvirt\n");
-        
-        // Step 7: Start the VM
-        fprintf(stdout, "📝 Step 7/7: Starting VM...\n");
-        
-        if (virDomainCreate(domain) < 0) {
-            virErrorPtr err = virGetLastError();
-            if (err) {
-                fprintf(stderr, "   ❌ Failed to start domain: %s\n", err->message);
-            }
-            virDomainFree(domain);
-            return false;
-        }
-        
-        
+        bool started = startVM(domain);
         virDomainFree(domain);
         
-        return true;
+        return started;
         
     } catch (const std::exception& e) {
         fprintf(stderr, "\n❌ Exception during deployment: %s\n", e.what());
         return false;
     }
 }
-
-
-
 
 bool VMOperations::destroyVM(const std::string& name) {
     if (!conn) return false;
@@ -915,13 +1095,13 @@ json VMOperations::getIP(const std::string& name) {
     json interfaces = json::array();
     bool foundIP = false;
     
-    for (int i = 0; i < ifaces_count; i++) {
+    for (auto i = 0; i < ifaces_count; i++) {
         json iface;
         iface["name"] = ifaces[i]->name;
         iface["hwaddr"] = ifaces[i]->hwaddr ? ifaces[i]->hwaddr : "";
         
         json addrs = json::array();
-        for (int j = 0; j < ifaces[i]->naddrs; j++) {
+        for (auto j = 0; j < ifaces[i]->naddrs; j++) {
             virDomainIPAddressPtr addr = &ifaces[i]->addrs[j];
             
             json addrInfo;

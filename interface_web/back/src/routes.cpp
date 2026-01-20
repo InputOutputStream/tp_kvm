@@ -1,6 +1,9 @@
 #include "../include/routes.hpp"
 #include "../include/utils.hpp"
 #include "../include/user_operations.hpp"
+#include "../include/paas_operations.hpp"
+#include "../include/swarm_operations.hpp"
+#include "../include/host_manager.hpp"
 #include "../include/json.hpp"
 #include <sstream>
 
@@ -33,10 +36,44 @@ bool checkVMAccess(const std::string& vmName, const UserContext& userCtx) {
     return manager.isOwner(vmName, userCtx.userId);
 }
 
-APIRoutes::APIRoutes(VMOperations* operations, LibvirtManager* mgr) 
-    : vmOps(operations), manager(mgr) {}
+
+APIRoutes::APIRoutes(VMOperations* operations, HostManager* mgr, UserOperations* user_operations,
+    PaaSOperations *paas, SwarmOperations *swarm, 
+    ResourceLogger* log) 
+    : vmOps(operations), manager(mgr), userOps(user_operations), paasOps(paas), swarmOps(swarm), Rlogger(log){}
 
 void APIRoutes::setup(httplib::Server& svr) {
+
+    svr.Get("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
+        // Admin only
+        auto userCtx = getUserContext(req);
+        if (!userCtx.isAdmin) {
+            res.status = 403;
+            return;
+        }
+        
+        json result = manager->listHosts();
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Post("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
+    auto userCtx = getUserContext(req);
+        if (!userCtx.isAdmin) {
+            res.status = 403;
+            return;
+        }
+        
+        json body = json::parse(req.body);
+        bool success = manager->addHost(body["uri"]);
+        
+        json result = {{"success", success}};
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Get("/api/hosts/stats", [this](const httplib::Request& req, httplib::Response& res) {
+        json result = manager->getAllHostsStats();
+        res.set_content(result.dump(), "application/json");
+    });
 
     // Login and Auth
     svr.Post("/api/auth/login", [this](const httplib::Request& req, httplib::Response& res) {
@@ -160,6 +197,35 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Put("/api/users/:username/quotas", [this](const httplib::Request& req, httplib::Response& res) {
             this->handleUpdateQuotas(req, res);
         });
+
+        // PaaS routes
+    svr.Post("/api/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req);
+        json body = json::parse(req.body);
+        
+        json result = paasOps->deployApplication(body);
+        
+        if (!result["success"].get<bool>()) {
+            res.status = 500;
+        }
+        
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Get("/api/paas/apps", [this](const httplib::Request& req, httplib::Response& res) {
+        json result = paasOps->listApplications();
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Delete("/api/paas/apps/:appId", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req);
+        std::string appId = req.matches[1];
+        
+        bool success = paasOps->deleteApplication(appId);
+        
+        json result = {{"success", success}};
+        res.set_content(result.dump(), "application/json");
+    });
 }
 
 void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {
@@ -180,8 +246,7 @@ void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res)
         return;
     }
     
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.authenticate(
+    json result = userOps->authenticate(
         body["username"].get<std::string>(),
         body["password"].get<std::string>()
     );
@@ -322,8 +387,7 @@ void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {    
     // Parse JSON body
-    auto userCtx = getUserContext(req);
-    
+    fprintf(stderr, "Received deploy request \n");
     json body;
     try {
         body = json::parse(req.body);
@@ -339,6 +403,8 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
         return;
     }
     
+    auto userCtx = getUserContext(req);
+
     // Validate user context
     if (userCtx.userId.empty()) {
         res.status = 401;
@@ -348,16 +414,13 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
     }
     
     // Check quotas for non-admin users
-    if (!userCtx.isAdmin) {
-        UserOperations userOps(manager->getConnection());
-        auto quotaCheck = userOps.checkUserQuota(userCtx.userId, body);
-        
-        if (!quotaCheck["allowed"].get<bool>()) {
-            res.status = 403;
-            res.set_content(quotaCheck.dump(), "application/json");
-            return;
-        }
+    auto quotaCheck = userOps->checkUserQuota(userCtx.userId, body);
+    if (!quotaCheck["allowed"].get<bool>()) {
+        res.status = 403;
+        res.set_content(quotaCheck.dump(), "application/json");
+        return;
     }
+
 
   // Add owner info
     body["owner"] = userCtx.userId;
@@ -676,52 +739,61 @@ void APIRoutes::handleCloneVM(const httplib::Request& req, httplib::Response& re
 void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response& res) {
     json result;
     result["success"] = false;
+    std::string name = req.matches[1];
+
+     auto userCtx = getUserContext(req);
     
-    if (!manager->isConnected()) {
-        result["error"] = "Not connected to libvirt";
-        res.set_content(result.dump(), "application/json");
+    if (!checkVMAccess(name, userCtx)) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
         return;
     }
     
-    virNodeInfo nodeInfo;
-    unsigned long hvVersion, libVersion;
-    
-    if (!manager->getNodeInfo(nodeInfo) || 
-        !manager->getVersion(hvVersion) || 
-        !manager->getLibVersion(libVersion)) {
-        result["error"] = "Failed to get system info";
-        res.set_content(result.dump(), "application/json");
-        return;
+    auto hosts = manager->listHosts();
+    if (!hosts["hosts"].empty()) {
+        std::string hostId = hosts["hosts"][0]["id"];
+        virConnectPtr conn = manager->getConnection(hostId);
+        
+        virNodeInfo nodeInfo;
+        unsigned long hvVersion, libVersion;
+        
+        if (virNodeGetInfo(conn, &nodeInfo) == 0 &&
+            virConnectGetVersion(conn, &hvVersion) == 0 &&
+            virConnectGetLibVersion(conn, &libVersion) == 0) {
+            json info = {
+                        {"model", std::string(nodeInfo.model)},
+                        {"memory", std::to_string(nodeInfo.memory) + " KB"},
+                        {"cpus", nodeInfo.cpus},
+                        {"mhz", std::to_string(nodeInfo.mhz) + " MHz"},
+                        {"nodes", nodeInfo.nodes},
+                        {"sockets", nodeInfo.sockets},
+                        {"cores", nodeInfo.cores},
+                        {"threads", nodeInfo.threads},
+                        {"hypervisorVersion", hvVersion},
+                        {"libvirtVersion", libVersion}
+                };
+
+            std::stringstream nodeInfoStr;
+            nodeInfoStr << "Model: " << nodeInfo.model << "\n";
+            nodeInfoStr << "Memory: " << nodeInfo.memory << " KB\n";
+            nodeInfoStr << "CPUs: " << nodeInfo.cpus << "\n";
+            nodeInfoStr << "MHz: " << nodeInfo.mhz << " MHz\n";
+            nodeInfoStr << "Nodes: " << nodeInfo.nodes << "\n";
+            nodeInfoStr << "Sockets: " << nodeInfo.sockets << "\n";
+            nodeInfoStr << "Cores: " << nodeInfo.cores << "\n";
+            nodeInfoStr << "Threads: " << nodeInfo.threads << "\n";
+            nodeInfoStr << "Hypervisor Version: " << hvVersion << "\n";
+            nodeInfoStr << "Libvirt Version: " << libVersion;
+            
+            result["success"] = true;
+            result["nodeInfo"] = nodeInfoStr.str();
+            result["version"] = "Libvirt version: " + std::to_string(libVersion);
+
+        }
+        
+        json error = {{"success", false}, {"error", "Failed to get system info"}};
     }
-    
-    json info = {
-        {"model", std::string(nodeInfo.model)},
-        {"memory", std::to_string(nodeInfo.memory) + " KB"},
-        {"cpus", nodeInfo.cpus},
-        {"mhz", std::to_string(nodeInfo.mhz) + " MHz"},
-        {"nodes", nodeInfo.nodes},
-        {"sockets", nodeInfo.sockets},
-        {"cores", nodeInfo.cores},
-        {"threads", nodeInfo.threads},
-        {"hypervisorVersion", hvVersion},
-        {"libvirtVersion", libVersion}
-    };
-    
-    std::stringstream nodeInfoStr;
-    nodeInfoStr << "Model: " << nodeInfo.model << "\n";
-    nodeInfoStr << "Memory: " << nodeInfo.memory << " KB\n";
-    nodeInfoStr << "CPUs: " << nodeInfo.cpus << "\n";
-    nodeInfoStr << "MHz: " << nodeInfo.mhz << " MHz\n";
-    nodeInfoStr << "Nodes: " << nodeInfo.nodes << "\n";
-    nodeInfoStr << "Sockets: " << nodeInfo.sockets << "\n";
-    nodeInfoStr << "Cores: " << nodeInfo.cores << "\n";
-    nodeInfoStr << "Threads: " << nodeInfo.threads << "\n";
-    nodeInfoStr << "Hypervisor Version: " << hvVersion << "\n";
-    nodeInfoStr << "Libvirt Version: " << libVersion;
-    
-    result["success"] = true;
-    result["nodeInfo"] = nodeInfoStr.str();
-    result["version"] = "Libvirt version: " + std::to_string(libVersion);
     
     res.set_content(result.dump(), "application/json");
 }
@@ -737,21 +809,20 @@ void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& 
         return;
     }
     
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.getAllUsersUsage();
+    json result = userOps->getAllUsersUsage();
     res.set_content(result.dump(), "application/json");
 }
 
 
 void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req);
+    // auto userCtx = getUserContext(req);
     
-    if (!userCtx.isAdmin) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Admin access required"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
+    // if (!userCtx.isAdmin) {
+    //     res.status = 403;
+    //     json error = {{"success", false}, {"error", "Admin access required"}};
+    //     res.set_content(error.dump(), "application/json");
+    //     return;
+    // }
     
     json body;
     try {
@@ -763,8 +834,7 @@ void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response&
         return;
     }
     
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.createUser(body);
+    json result = userOps->createUser(body);
     
     if (!result["success"].get<bool>()) {
         res.status = 400;
@@ -774,14 +844,6 @@ void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response&
 }    
 
 void APIRoutes::handleUpdateUser(const httplib::Request& req, httplib::Response& res){
-    auto userCtx = getUserContext(req);
-    
-    if (!userCtx.isAdmin) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Admin access required"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
 
     json body;
     try {
@@ -794,8 +856,7 @@ void APIRoutes::handleUpdateUser(const httplib::Request& req, httplib::Response&
     }
 
     std::string username = req.matches[1];
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.updateUser(username, body);
+    json result = userOps->updateUser(username, body);
     
     if (!result["success"].get<bool>()) {
         res.status = 400;
@@ -816,8 +877,7 @@ void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response&
     }
 
     std::string username = req.matches[1];
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.deleteUser(username);
+    json result = userOps->deleteUser(username);
     
     if (!result["success"].get<bool>()) {
         res.status = 400;
@@ -838,8 +898,7 @@ void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Respons
     }
 
     std::string username = req.matches[1];
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.getUserUsage(username);
+    json result = userOps->getUserUsage(username);
     
     if (!result["success"].get<bool>()) {
         res.status = 400;
@@ -871,8 +930,7 @@ void APIRoutes::handleUpdateQuotas(const httplib::Request& req, httplib::Respons
         return;
     }
     
-    UserOperations userOps(manager->getConnection());
-    json result = userOps.updateUserQuotas(username, body);
+    json result = userOps->updateUserQuotas(username, body);
     
     if (!result["success"].get<bool>()) {
         res.status = 400;

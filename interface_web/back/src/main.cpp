@@ -2,60 +2,72 @@
 #include "../include/httplib.h"
 #include "../include/libvirt_manager.hpp"
 #include "../include/vm_operations.hpp"
+#include "../include/host_manager.hpp"
 #include "../include/routes.hpp"
 #include "../include/cors.hpp"
 #include "../include/utils.hpp"
 #include "../include/definitions.hpp"
+#include "../include/config_manager.hpp"
+#include "../include/host_manager.hpp"
+#include "../include/resource_logger.hpp"
+#include "../include/paas_operations.hpp"
+#include "../include/swarm_operations.hpp"
 
 using namespace httplib;
 
 int main() {
-    std::cout << "Starting libvirt C++ server..." << std::endl;
+    ConfigManager config;
+    ResourceLogger logger;
+    logger.logSystemEvent(LogLevel::INFO, "Starting THOTH CLOUD server");
     
-    // Initialize libvirt manager
-    LibvirtManager manager;
+    // Initialize host manager
+    HostManager hostManager;
     
-    // Connect to libvirt (local or remote based on def.hpp config)
-    if (!manager.connect(use_remote, remote_host, username)) {
-        std::cerr << "Unable to connect to libvirt" << std::endl;
-        std::cerr << "Check that libvirt is installed and active" << std::endl;
-        std::cerr << "   sudo systemctl start libvirtd" << std::endl;
+    // Load hosts from config
+    auto hosts = config.getList("HOSTS");
+    if (hosts.empty()) {
+        logger.logSystemEvent(LogLevel::ERROR, "Empty Host list File: ");
+    }
+    
+    for (const auto& host : hosts) {
+        if (hostManager.addHost(host)) {
+            logger.logSystemEvent(LogLevel::INFO, "Added host: " + host);
+        } else {
+            logger.logSystemEvent(LogLevel::ERROR, "Failed to add host: " + host);
+        }
+    }
+
+    auto hostList = hostManager.listHosts();
+    if (hostList["hosts"].empty()) {
+        std::cerr << "No hosts available!" << std::endl;
         return 1;
     }
     
-    std::cout << "Connected to libvirt successfully" << std::endl;
+    // Initialize operations
+    std::string primaryHostId = hostList["hosts"][0]["id"];
+    virConnectPtr primaryConn = hostManager.getConnection(primaryHostId);
     
-    // Initialize VM operations
-    VMOperations vmOps(manager.getConnection());
+    VMOperations vmOps(primaryConn, &hostManager);
 
-    // Initialize user operations
-    UserOperations userOps(manager.getConnection());
+    UserOperations userOps(primaryConn);
+    PaaSOperations paasOps(primaryConn);
+    SwarmOperations swarmOps(primaryConn);
+
+    // Initialize routes with all dependencies
+    APIRoutes apiRoutes(&vmOps, &hostManager, &userOps, &paasOps, &swarmOps, &logger);
     
-    // Initialize API routes
-    APIRoutes apiRoutes(&vmOps, &manager, &userOps);
-    
-    // Create HTTP server
+    // Create server
     Server svr;
-    
-    // Setup CORS middleware
     cors::setupMiddleware(svr);
-    
-    // Setup API routes
     apiRoutes.setup(svr);
     
-    // Serve static files if front directory exists
-    if (fileExists("../../front")) {
-        svr.set_mount_point("/", "../../front");
-    }
+    int port = config.getInt("API_PORT", 3000);
     
-    std::cout << "Server started on http://localhost:" << PORT << std::endl;
-    std::cout << "API available at http://localhost:" << PORT << "/api" << std::endl;
-    std::cout << "\nPress Ctrl+C to stop the server" << std::endl;
+    std::cout << "Server started on http://localhost:" << port << std::endl;
+    logger.logSystemEvent(LogLevel::INFO, "Server listening on port " + std::to_string(port));
     
-    // Start server
-    svr.listen("0.0.0.0", PORT);
+    svr.listen("0.0.0.0", port);
     
-    // Cleanup happens automatically via destructor
-    
+    logger.logSystemEvent(LogLevel::INFO, "Server shutdown");
     return 0;
 }
