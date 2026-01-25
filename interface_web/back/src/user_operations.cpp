@@ -40,37 +40,8 @@ std::string UserOperations::hashPassword(const std::string& password) {
     return ss.str();
 }
 
-json UserOperations::authenticate(const std::string& username, const std::string& password) {
-    json result;
-    result["success"] = false;
-    
-    for (const auto& user : users) {
-        if (user["username"] == username) {
-            std::string storedHash = user.value("passwordHash", "");
-            std::string inputHash = hashPassword(password);
-            
-            if (storedHash == inputHash && user["active"].get<bool>()) {
-                result["success"] = true;
-                result["token"] = generateToken(username);
-                result["user"] = {
-                    {"username", user["username"]},
-                    {"role", user["role"]},
-                    {"email", user["email"]}
-                };
-                return result;
-            } else {
-                result["error"] = "Invalid password";
-                return result;
-            }
-        }
-    }
-    
-    result["error"] = "User not found";
-    return result;
-}
-
 std::string UserOperations::generateToken(const std::string& username) {
-    // Simple token: username + timestamp + hash
+    // Simple token: username + No of users + hash
     auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::string tokenData = username + std::to_string(now);
     return hashPassword(tokenData);
@@ -97,6 +68,89 @@ bool UserOperations::saveUsers() {
     }
 }
 
+
+bool UserOperations::validateToken(const std::string& token, std::string& username, std::string& role) {
+    std::lock_guard<std::mutex> lock(sessions_mutex);
+    
+    auto it = sessions.find(token);
+    if (it == sessions.end()) {
+        return false;
+    }
+    
+    // Check if token has expired (1 hour expiry)
+    if (it->second.expiry < getCurrentTimeMs()) {
+        sessions.erase(it);
+        return false;
+    }
+    
+    username = it->second.username;
+    role = it->second.role;
+    
+    // Update expiry (refresh on each use)
+    it->second.expiry = getCurrentTimeMs() + 3600000; // 1 hour
+    
+    return true;
+}
+
+// authenticate user
+json UserOperations::authenticate(const std::string& username, const std::string& password) {
+    json result;
+    result["success"] = false;
+    
+    for (const auto& user : users) {
+        if (user["username"] == username) {
+            std::string storedHash = user.value("passwordHash", "");
+            std::string inputHash = hashPassword(password);
+            
+            if (storedHash == inputHash && user["active"].get<bool>()) {
+                // Generate token
+                std::string token = generateToken(username);
+                
+                // Store session
+                {
+                    std::lock_guard<std::mutex> lock(sessions_mutex);
+                    UserSession session;
+                    session.username = username;
+                    session.role = user["role"].get<std::string>();
+                    session.expiry = getCurrentTimeMs() + 3600000; // 1 hour
+                    sessions[token] = session;
+                }
+                
+                result["success"] = true;
+                result["token"] = token;
+                result["user"] = {
+                    {"username", user["username"]},
+                    {"role", user["role"]},
+                    {"email", user.value("email", "")},
+                    {"firstName", user.value("firstName", "")},
+                    {"lastName", user.value("lastName", "")}
+                };
+                return result;
+            } else {
+                result["error"] = "Invalid password";
+                return result;
+            }
+        }
+    }
+    
+    result["error"] = "User not found";
+    return result;
+}
+
+// Cleanup method
+void UserOperations::cleanupExpiredSessions() {
+    std::lock_guard<std::mutex> lock(sessions_mutex);
+    auto now = getCurrentTimeMs();
+    
+    for (auto it = sessions.begin(); it != sessions.end(); ) {
+        if (it->second.expiry < now) {
+            it = sessions.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 json UserOperations::createUser(const json& userData) {
     json result;
     result["success"] = false;
@@ -119,6 +173,7 @@ json UserOperations::createUser(const json& userData) {
     // Hash password
     std::string passwordHash = hashPassword(userData["password"].get<std::string>());
     
+    //TODO: Remove quota mgnt from users logic
     json newUser = {
         {"id", users.size() + 1},
         {"username", username},

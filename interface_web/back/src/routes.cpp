@@ -10,19 +10,28 @@
 using json = nlohmann::json;
 
 
-UserContext getUserContext(const httplib::Request& req) {
+UserContext getUserContext(const httplib::Request& req, UserOperations* userOps) {
     UserContext ctx;
-    ctx.userId = req.get_header_value("X-User-ID");
-    ctx.role = req.get_header_value("X-User-Role");
-    ctx.isAdmin = (ctx.role == "admin");
     
-    // Fallback: try to get from query params (for testing)
-    if (ctx.userId.empty() && req.has_param("user_id")) {
-        ctx.userId = req.get_param_value("user_id");
-    }
-    if (ctx.role.empty() && req.has_param("role")) {
-        ctx.role = req.get_param_value("role");
-        ctx.isAdmin = (ctx.role == "admin");
+    std::string authHeader = req.get_header_value("Authorization");
+    std::cerr << "Auth header: '" << authHeader << "'" << std::endl;
+    
+    if (authHeader.find("Bearer ") == 0) {
+        std::string token = authHeader.substr(7);
+        std::cerr << "Token extracted: '" << token << "'" << std::endl;
+        
+        std::string username, role;
+        if (userOps->validateToken(token, username, role)) {
+            std::cerr << "Token valid for user: " << username << ", role: " << role << std::endl;
+            ctx.userId = username;
+            ctx.role = role;
+            ctx.isAdmin = (role == "admin");
+            return ctx;
+        } else {
+            std::cerr << "Token validation failed" << std::endl;
+        }
+    } else {
+        std::cerr << "No Bearer token found" << std::endl;
     }
     
     return ctx;
@@ -42,11 +51,13 @@ APIRoutes::APIRoutes(VMOperations* operations, HostManager* mgr, UserOperations*
     ResourceLogger* log) 
     : vmOps(operations), manager(mgr), userOps(user_operations), paasOps(paas), swarmOps(swarm), Rlogger(log){}
 
+
+    
 void APIRoutes::setup(httplib::Server& svr) {
 
     svr.Get("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
         // Admin only
-        auto userCtx = getUserContext(req);
+        auto userCtx = getUserContext(req, userOps);
         if (!userCtx.isAdmin) {
             res.status = 403;
             return;
@@ -57,7 +68,7 @@ void APIRoutes::setup(httplib::Server& svr) {
     });
 
     svr.Post("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
         if (!userCtx.isAdmin) {
             res.status = 403;
             return;
@@ -68,6 +79,35 @@ void APIRoutes::setup(httplib::Server& svr) {
         
         json result = {{"success", success}};
         res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Get("/api/auth/validate", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string authHeader = req.get_header_value("Authorization");
+        
+        if (authHeader.find("Bearer ") != 0) {
+            res.status = 401;
+            json error = {{"success", false}, {"error", "Invalid authorization header"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        std::string token = authHeader.substr(7);
+        std::string username, role;
+        
+        if (userOps->validateToken(token, username, role)) {
+            json result = {
+                {"success", true},
+                {"user", {
+                    {"username", username},
+                    {"role", role}
+                }}
+            };
+            res.set_content(result.dump(), "application/json");
+        } else {
+            res.status = 401;
+            json error = {{"success", false}, {"error", "Invalid or expired token"}};
+            res.set_content(error.dump(), "application/json");
+        }
     });
 
     svr.Get("/api/hosts/stats", [this](const httplib::Request& req, httplib::Response& res) {
@@ -200,7 +240,7 @@ void APIRoutes::setup(httplib::Server& svr) {
 
         // PaaS routes
     svr.Post("/api/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req);
+        auto userCtx = getUserContext(req, userOps);
         json body = json::parse(req.body);
         
         json result = paasOps->deployApplication(body);
@@ -218,7 +258,7 @@ void APIRoutes::setup(httplib::Server& svr) {
     });
 
     svr.Delete("/api/paas/apps/:appId", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req);
+        auto userCtx = getUserContext(req, userOps);
         std::string appId = req.matches[1];
         
         bool success = paasOps->deleteApplication(appId);
@@ -250,6 +290,8 @@ void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res)
         body["username"].get<std::string>(),
         body["password"].get<std::string>()
     );
+
+    std::cerr << "Login result: " << result.dump() << std::endl;  
     
     if (!result["success"].get<bool>()) {
         res.status = 401;
@@ -260,7 +302,7 @@ void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res)
 
 // Routes Handler definitions
 void APIRoutes::handleListVMs(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     json result;
     if (userCtx.isAdmin) {
@@ -275,7 +317,7 @@ void APIRoutes::handleListVMs(const httplib::Request& req, httplib::Response& re
 
 void APIRoutes::handleGetVMInfo(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -294,7 +336,7 @@ void APIRoutes::handleGetVMInfo(const httplib::Request& req, httplib::Response& 
 
 void APIRoutes::handleGetVMStatus(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -313,7 +355,7 @@ void APIRoutes::handleGetVMStatus(const httplib::Request& req, httplib::Response
 
 void APIRoutes::handleGetVMStats(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -333,7 +375,7 @@ void APIRoutes::handleGetVMStats(const httplib::Request& req, httplib::Response&
 
 void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
 
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -353,7 +395,7 @@ void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& re
 
 void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -403,7 +445,7 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
         return;
     }
     
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
 
     // Validate user context
     if (userCtx.userId.empty()) {
@@ -454,7 +496,7 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handleShutdownVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -475,7 +517,7 @@ void APIRoutes::handleShutdownVM(const httplib::Request& req, httplib::Response&
 
 void APIRoutes::handleDestroyVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -495,7 +537,7 @@ void APIRoutes::handleDestroyVM(const httplib::Request& req, httplib::Response& 
 
 void APIRoutes::handleRebootVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -515,7 +557,7 @@ void APIRoutes::handleRebootVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handlePauseVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -535,7 +577,7 @@ void APIRoutes::handlePauseVM(const httplib::Request& req, httplib::Response& re
 
 void APIRoutes::handleResumeVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -555,7 +597,7 @@ void APIRoutes::handleResumeVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handleGetVNC(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -572,7 +614,7 @@ void APIRoutes::handleGetIP(const httplib::Request& req, httplib::Response& res)
 {
     std::string name = req.matches[1];
 
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -592,7 +634,7 @@ void APIRoutes::handleGetIP(const httplib::Request& req, httplib::Response& res)
 
 void APIRoutes::handleListSnapshots(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -612,7 +654,7 @@ void APIRoutes::handleListSnapshots(const httplib::Request& req, httplib::Respon
 
 void APIRoutes::handleCreateSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -654,7 +696,7 @@ void APIRoutes::handleCreateSnapshot(const httplib::Request& req, httplib::Respo
 void APIRoutes::handleRevertSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
     std::string snapName = req.matches[2];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -675,7 +717,7 @@ void APIRoutes::handleRevertSnapshot(const httplib::Request& req, httplib::Respo
 void APIRoutes::handleDeleteSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
     std::string snapName = req.matches[2];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
 
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -695,7 +737,7 @@ void APIRoutes::handleDeleteSnapshot(const httplib::Request& req, httplib::Respo
 
 void APIRoutes::handleCloneVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -741,7 +783,7 @@ void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response&
     result["success"] = false;
     std::string name = req.matches[1];
 
-     auto userCtx = getUserContext(req);
+     auto userCtx = getUserContext(req, userOps);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -800,7 +842,7 @@ void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response&
 
 
 void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!userCtx.isAdmin) {
         res.status = 403;
@@ -815,7 +857,7 @@ void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& 
 
 
 void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {
-    // auto userCtx = getUserContext(req);
+    // auto userCtx = getUserContext(req, userOps);
     
     // if (!userCtx.isAdmin) {
     //     res.status = 403;
@@ -909,7 +951,7 @@ void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Respons
 }
 
 void APIRoutes::handleUpdateQuotas(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req);
+    auto userCtx = getUserContext(req, userOps);
     
     if (!userCtx.isAdmin) {
         res.status = 403;

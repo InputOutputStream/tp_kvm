@@ -18,7 +18,8 @@ void addHeaders(httplib::Response& res, const std::string& origin = "*") {
         res.set_header("Access-Control-Allow-Origin", origin);
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Role"); 
+
         // Only set credentials if not using wildcard
         if (origin != "*") {
             res.set_header("Access-Control-Allow-Credentials", "true");
@@ -28,6 +29,7 @@ void addHeaders(httplib::Response& res, const std::string& origin = "*") {
 
 void setupMiddleware(httplib::Server& svr) {
     // Handle OPTIONS preflight requests FIRST (before post routing)
+
     svr.Options(R"(.*)", [](const httplib::Request& req, httplib::Response& res) {
         std::string origin = req.get_header_value("Origin");
         
@@ -40,9 +42,9 @@ void setupMiddleware(httplib::Server& svr) {
         }
         
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Role");  // Add these
         res.set_header("Access-Control-Max-Age", "3600");
-        res.status = 204; // No Content for OPTIONS
+        res.status = 204;
     });
     
     // Add CORS headers to all other responses
