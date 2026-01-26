@@ -5,34 +5,6 @@
 let currentVM = null;
 let statsInterval = null;
 
-// Fetch API Wrapper
-async function fetchAPI(endpoint, options = {}) {
-    try {
-        const response = await fetch(`${API_URL}${endpoint}`, options);
-        const contentType = response.headers.get('content-type');
-        
-        if (contentType && contentType.includes('application/json')) {
-            const data = await response.json();
-            
-            if (!data.success && response.status >= 400) {
-                throw new Error(data.error || 'An error occurred');
-            }
-            
-            return data;
-        } else {
-            throw new Error('Non-JSON response from server');
-        }
-    } catch (error) {
-        if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
-            console.warn('Backend server not available:', error.message);
-            throw new Error('Backend server unavailable');
-        }
-        
-        showToast(error.message, 'error');
-        throw error;
-    }
-}
-
 // Load VMs
 async function loadVMs() {
     const vmsList = document.getElementById('vms-list');
@@ -167,7 +139,7 @@ async function loadVMInfo() {
     vmInfo.innerHTML = '<p>Loading information...</p>';
     
     try {
-        const data = await fetchAPI(`/vms/${currentVM}`);
+        const data = await window.fetchAPI(`/vms/${currentVM}`);
         vmInfo.textContent = data.info;
     } catch (error) {
         vmInfo.innerHTML = '<p>Error loading information</p>';
@@ -186,7 +158,7 @@ async function updateStats() {
     if (!currentVM) return;
     
     try {
-        const data = await fetchAPI(`/vms/${currentVM}/stats`);
+        const data = await window.fetchAPI(`/vms/${currentVM}/stats`);
         const stats = data.stats;
         
         if (!stats) return;
@@ -209,7 +181,7 @@ async function startVM() {
     
     try {
         showToast('Starting VM...', 'info');
-        await fetchAPI(`/vms/${currentVM}/start`, { method: 'POST' });
+        await window.fetchAPI(`/vms/${currentVM}/start`, { method: 'POST' });
         showToast('✅ VM started successfully', 'success');
         await loadVMInfo();
         await loadVMs();
@@ -229,7 +201,7 @@ async function shutdownVM() {
     
     try {
         showToast('Shutting down VM...', 'info');
-        await fetchAPI(`/vms/${currentVM}/shutdown`, { method: 'POST' });
+        await window.fetchAPI(`/vms/${currentVM}/shutdown`, { method: 'POST' });
         showToast('✅ VM shut down successfully', 'success');
         await loadVMInfo();
         await loadVMs();
@@ -249,7 +221,7 @@ async function rebootVM() {
     
     try {
         showToast('Rebooting VM...', 'info');
-        await fetchAPI(`/vms/${currentVM}/reboot`, { method: 'POST' });
+        await window.fetchAPI(`/vms/${currentVM}/reboot`, { method: 'POST' });
         showToast('✅ VM rebooted', 'success');
     } catch (error) {
         showToast(`❌ Error: ${error.message}`, 'error');
@@ -261,7 +233,7 @@ async function pauseVM() {
     
     try {
         showToast('Pausing VM...', 'info');
-        await fetchAPI(`/vms/${currentVM}/pause`, { method: 'POST' });
+        await window.fetchAPI(`/vms/${currentVM}/pause`, { method: 'POST' });
         showToast('✅ VM paused', 'success');
         await loadVMInfo();
     } catch (error) {
@@ -274,7 +246,7 @@ async function resumeVM() {
     
     try {
         showToast('Resuming VM...', 'info');
-        await fetchAPI(`/vms/${currentVM}/resume`, { method: 'POST' });
+        await window.fetchAPI(`/vms/${currentVM}/resume`, { method: 'POST' });
         showToast('✅ VM resumed', 'success');
         await loadVMInfo();
     } catch (error) {
@@ -290,7 +262,7 @@ async function loadSnapshots() {
     snapshotsList.innerHTML = '<p>Loading snapshots...</p>';
     
     try {
-        const data = await fetchAPI(`/vms/${currentVM}/snapshots`);
+        const data = await window.fetchAPI(`/vms/${currentVM}/snapshots`);
         
         if (data.snapshots.length === 0) {
             snapshotsList.innerHTML = '<p>No snapshots found</p>';
@@ -337,7 +309,7 @@ async function revertSnapshot(snapshotName) {
     
     try {
         showToast('Restoring snapshot...', 'info');
-        await fetchAPI(`/vms/${currentVM}/snapshots/${snapshotName}/revert`, {
+        await window.fetchAPI(`/vms/${currentVM}/snapshots/${snapshotName}/revert`, {
             method: 'POST'
         });
         
@@ -357,7 +329,7 @@ async function deleteSnapshot(snapshotName) {
     
     try {
         showToast('Deleting snapshot...', 'info');
-        await fetchAPI(`/vms/${currentVM}/snapshots/${snapshotName}`, {
+        await window.fetchAPI(`/vms/${currentVM}/snapshots/${snapshotName}`, {
             method: 'DELETE'
         });
         

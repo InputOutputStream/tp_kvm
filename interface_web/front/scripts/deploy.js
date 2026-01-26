@@ -129,19 +129,19 @@ function getFlavorConfig(flavorType) {
         small: {
             memory: 1024,  // 2GB
             vcpus: 1,
-            disk: 15,
-            price: 2500
+            disk: 10,
+            price: 2000
         },
         medium: {
             memory: 2048,  // 4GB
             vcpus: 1,
-            disk: 20,
+            disk: 10,
             price: 3500
         },
         large: {
-            memory: 4096,  // 8GB
-            vcpus: 2,
-            disk: 40,
+            memory: 3072,  // 8GB
+            vcpus: 1,
+            disk: 10,
             price: 6500
         }
     };

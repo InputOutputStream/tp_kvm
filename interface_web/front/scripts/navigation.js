@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeNavigation();
     initializeSidebar();
     loadInitialData();
+    updateUserDisplay();
 });
 
 // Initialize Navigation System
@@ -196,3 +197,25 @@ function debounce(func, wait) {
     };
 }
 
+
+
+// Update user display in sidebar
+function updateUserDisplay() {
+    if (window.authService && window.authService.currentUser) {
+        const user = window.authService.currentUser;
+        
+        const nameElement = document.getElementById('current-user-name');
+        const roleElement = document.getElementById('current-user-role');
+        
+        if (nameElement) {
+            const displayName = user.firstName && user.lastName 
+                ? `${user.firstName} ${user.lastName}`
+                : user.username;
+            nameElement.textContent = displayName;
+        }
+        
+        if (roleElement) {
+            roleElement.textContent = user.role === 'admin' ? 'Administrator' : 'User';
+        }
+    }
+}

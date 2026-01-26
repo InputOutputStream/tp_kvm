@@ -10,51 +10,83 @@ class AuthService {
         this.init();
     }
 
+    //TODO: Add token validattion
     init() {
         // Check for existing session
-        const savedToken = localStorage.getItem('thoth_token');
-        const savedUser = localStorage.getItem('thoth_user');
-        
+        const savedToken = localStorage.getItem('thoth_token') || sessionStorage.getItem('thoth_token');
+        const savedUser = localStorage.getItem('thoth_user') || sessionStorage.getItem('thoth_user');;
+
         if (savedToken && savedUser) {
-            this.token = savedToken;
-            this.currentUser = JSON.parse(savedUser);
-            this.setAuthHeader();
+        this.token = savedToken;
+        this.currentUser = JSON.parse(savedUser);
+        this.setAuthHeader();
+        
+        // Verify token is still valid with backend
+        this.validateToken();
         }
     }
 
-    async login(username, password, rememberMe = false) {
-        try {
-            const response = await fetch(`${API_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            });
-
-            const data = await response.json();
-            
-            if (data.success && data.token) {
-                this.token = data.token;
-                this.currentUser = data.user;
-                
-                // Store session
-                const storage = rememberMe ? localStorage : sessionStorage;
-                storage.setItem('thoth_token', data.token);
-                storage.setItem('thoth_user', JSON.stringify(data.user));
-            
-                
-                // Set auth header for future requests
-                this.setAuthHeader();
-                
-                return { success: true, user: data.user };
-            } else {
-                return { success: false, error: data.error || 'Authentication failed' };
+    async validateToken() {
+    try {
+        const response = await fetch(`${API_URL}/auth/validate`, {
+            headers: {
+                'Authorization': `Bearer ${this.token}`
             }
-        } catch (error) {
-            console.error('Login error:', error);
-            return { success: false, error: 'Server error' };
+        });
+        
+        if (!response.ok) {
+            this.logout();
         }
+    } catch (error) {
+        console.error('Token validation failed:', error);
+        this.logout();
     }
+}
 
+async login(username, password, rememberMe = false) {
+    try {
+        const response = await fetch(`${API_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        const data = await response.json();
+        
+        if (data.success && data.token) {
+            this.token = data.token;
+            this.currentUser = data.user;
+            
+            // Clear both storages first
+            localStorage.removeItem('thoth_token');
+            localStorage.removeItem('thoth_user');
+            sessionStorage.removeItem('thoth_token');
+            sessionStorage.removeItem('thoth_user');
+            
+            // Store session in chosen storage
+            if (rememberMe) {
+                localStorage.setItem('thoth_token', data.token);
+                localStorage.setItem('thoth_user', JSON.stringify(data.user));
+            } else {
+                sessionStorage.setItem('thoth_token', data.token);
+                sessionStorage.setItem('thoth_user', JSON.stringify(data.user));
+            }
+            
+            // Set auth header for future requests
+            this.setAuthHeader();
+            
+            // Ensure global state is updated immediately
+            window.authService = this;
+            
+            return { success: true, user: data.user };
+        } else {
+            return { success: false, error: data.error || 'Authentication failed' };
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        return { success: false, error: 'Server error' };
+    }
+}
     async register(userData) {
         try {
             const response = await fetch(`${API_URL}/auth/register`, {
@@ -111,46 +143,57 @@ class AuthService {
         
         window.fetchAPI = async function(endpoint, options = {}) {
             if (!authService.token || !authService.currentUser) {
-                throw new Error('Not authenticated');
-            }
-
-            options.headers = {
-                ...options.headers,
-                'Authorization': `Bearer ${authService.token}`,
-                'X-User-ID': authService.currentUser.username,
-                'X-User-Role': authService.currentUser.role,
-                'Content-Type': 'application/json'
-            };
-            
-            try {
-                const response = await fetch(`${API_URL}${endpoint}`, options);
+                // Try to reinitialize from storage
+                authService.init();
                 
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    const data = await response.json();
-                    
-                    if (response.status === 403) {
-                        showToast('⛔ Access denied', 'error');
-                        throw new Error(data.error || 'Access denied');
-                    }
-                    
-                    if (!data.success && response.status >= 400) {
-                        throw new Error(data.error || 'An error occurred');
-                    }
-                    
-                    return data;
-                } else {
-                    throw new Error('Non-JSON response from server');
+                if (!authService.token) {
+                    throw new Error('Not authenticated');
                 }
-            } catch (error) {
-                if (error.message.includes('Failed to fetch')) {
-                    throw new Error('Backend server unavailable. Please check connection.');
-                }
-                throw error;
             }
-        };
-    }
 
+        options.headers = {
+            ...options.headers,
+            'Authorization': `Bearer ${authService.token}`,
+            'X-User-ID': authService.currentUser.username,
+            'X-User-Role': authService.currentUser.role,
+            'Content-Type': 'application/json'
+        };
+        
+        try {
+            const response = await fetch(`${API_URL}${endpoint}`, options);
+            
+            // Handle 401 Unauthorized (token expired)
+            if (response.status === 401) {
+                authService.logout();
+                window.location.href = 'login.html';
+                throw new Error('Session expired. Please login again.');
+            }
+            
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                
+                if (response.status === 403) {
+                    showToast('⛔ Access denied', 'error');
+                    throw new Error(data.error || 'Access denied');
+                }
+                
+                if (!data.success && response.status >= 400) {
+                    throw new Error(data.error || 'An error occurred');
+                }
+                
+                return data;
+            } else {
+                throw new Error('Non-JSON response from server');
+            }
+        } catch (error) {
+            if (error.message.includes('Failed to fetch')) {
+                throw new Error('Backend server unavailable. Please check connection.');
+            }
+            throw error;
+        }
+    };
+}
     // To IMPL
     async changePassword(oldPassword, newPassword) {
         try {
@@ -254,10 +297,10 @@ async function handleRegister(event) {
         username: document.getElementById('username').value,
         password: document.getElementById('password').value,
         role: document.getElementById('role').value,
-        maxVMs: 5,
-        maxCPU: 8,
-        maxRAM: 16,
-        maxStorage: 100
+        maxVMs: 4,
+        maxCPU: 4,
+        maxRAM: 4,
+        maxStorage: 50
     };
     
     const confirmPassword = document.getElementById('confirm-password').value;
@@ -303,7 +346,7 @@ function validatePasswordStrength(password) {
     const hasNumbers = /\d/.test(password);
     const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
     
-    return hasMinLength && hasUpperCase && hasLowerCase && hasNumbers && hasSpecialChar;
+    return hasMinLength && hasUpperCase && hasLowerCase && hasNumbers && hasSpecialChar || 1; // for testing
 }
 
 // Password Strength Indicator

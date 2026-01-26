@@ -1,13 +1,5 @@
 import APPS_CATALOG from "./paas-catalog.js";
 
-// Users Data (for demo)
-let users = [
-    { id: 1, username: 'admin', role: 'admin', vms: 5, cpu: 8, ram: 16 },
-    { id: 2, username: 'dev1', role: 'user', vms: 2, cpu: 4, ram: 8 },
-    { id: 3, username: 'dev2', role: 'user', vms: 1, cpu: 2, ram: 4 }
-];
-
-
 const style = document.createElement('style');
 style.textContent = `
     .owner-badge {
@@ -108,6 +100,22 @@ function createRunningAppCard(app) {
     return card;
 }
 
+function renderRunningApps(apps) {
+    const appsGrid = document.getElementById('apps-grid');
+    if (!appsGrid) return;
+    
+    appsGrid.innerHTML = '';
+    
+    if (!apps || apps.length === 0) {
+        appsGrid.innerHTML = '<p class="loading-text">No applications deployed yet</p>';
+        return;
+    }
+    
+    apps.forEach(app => {
+        const appCard = createRunningAppCard(app);
+        appsGrid.appendChild(appCard);
+    });
+}
 
 async function deployApp(appId) {
     const app = APPS_CATALOG.find(a => a.id === appId);
@@ -343,10 +351,10 @@ async function createUser(event) {
         email: document.getElementById('new-email').value,
         password: document.getElementById('new-password').value,
         role: document.getElementById('new-role').value,
-        maxVMs: parseInt(document.getElementById('new-maxVMs').value),
-        maxCPU: parseInt(document.getElementById('new-maxCPU').value),
-        maxRAM: parseInt(document.getElementById('new-maxRAM').value),
-        maxStorage: parseInt(document.getElementById('new-maxStorage').value)
+        // maxVMs: parseInt(document.getElementById('new-maxVMs').value),
+        // maxCPU: parseInt(document.getElementById('new-maxCPU').value),
+        // maxRAM: parseInt(document.getElementById('new-maxRAM').value),
+        // maxStorage: parseInt(document.getElementById('new-maxStorage').value)
     };
     
     try {
