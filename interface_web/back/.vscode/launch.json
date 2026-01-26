@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": false,
-      "cwd": "/home/thot/Desktop/TP_KVM/tp_kvm/interface_web/back/src",
-      "program": "/home/thot/Desktop/TP_KVM/tp_kvm/interface_web/back/src/build/Debug/outDebug",
+      "cwd": "/home/thot/Desktop/TP_KVM/tp_kvm/interface_web/back",
+      "program": "/home/thot/Desktop/TP_KVM/tp_kvm/interface_web/back/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

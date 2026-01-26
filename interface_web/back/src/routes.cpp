@@ -44,14 +44,6 @@ bool checkVMAccess(const std::string& vmName, const UserContext& userCtx) {
     VMNameManager manager;
     return manager.isOwner(vmName, userCtx.userId);
 }
-
-
-APIRoutes::APIRoutes(VMOperations* operations, HostManager* mgr, UserOperations* user_operations,
-    PaaSOperations *paas, SwarmOperations *swarm, 
-    ResourceLogger* log) 
-    : vmOps(operations), manager(mgr), userOps(user_operations), paasOps(paas), swarmOps(swarm), Rlogger(log){}
-
-
     
 void APIRoutes::setup(httplib::Server& svr) {
 
@@ -234,9 +226,6 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Get("/api/users/:username/usage", [this](const httplib::Request& req, httplib::Response& res) {
             this->handleGetUserUsage(req, res);
         });
-    svr.Put("/api/users/:username/quotas", [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleUpdateQuotas(req, res);
-        });
 
         // PaaS routes
     svr.Post("/api/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
@@ -266,6 +255,43 @@ void APIRoutes::setup(httplib::Server& svr) {
         json result = {{"success", success}};
         res.set_content(result.dump(), "application/json");
     });
+
+    // Flavors
+    svr.Get("/api/flavors", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleListFlavors(req, res); 
+    });
+
+    // Base images  
+    svr.Get("/api/images", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleListImages(req, res);
+     });
+
+    // Networks
+    svr.Get("/api/networks", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleListAllNetworks(req, res);
+     });
+    svr.Post("/api/networks/user", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleCreateNetwork(req, res);
+     });
+
+    // Swarm clusters
+    svr.Post("/api/swarm/clusters", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleCreateCluster(req, res);
+    });
+    svr.Get("/api/swarm/clusters", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleListClusters(req, res);
+     });
+    svr.Get("/api/swarm/clusters/:id", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleGetCluster(req, res);
+     });
+    svr.Delete("/api/swarm/clusters/:id", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleDeleteCluster(req, res);
+     });
+
+    // Host strategy
+    svr.Put("/api/hosts/strategy", [this](const httplib::Request& req, httplib::Response& res) { 
+        this->handleSetHostSelectionStrategy(req, res);
+     });
 }
 
 void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {
@@ -404,7 +430,7 @@ void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& r
         return;
     }
     // Get query parameter for disk removal
-    bool removeDisks = false;
+    bool removeDisks = true;
     if (req.has_param("removeDisks")) {
         std::string removeDiskParam = req.get_param_value("removeDisks");
         removeDisks = (removeDiskParam == "true" || removeDiskParam == "1");
@@ -454,15 +480,6 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
         res.set_content(error.dump(), "application/json");
         return;
     }
-    
-    // Check quotas for non-admin users
-    auto quotaCheck = userOps->checkUserQuota(userCtx.userId, body);
-    if (!quotaCheck["allowed"].get<bool>()) {
-        res.status = 403;
-        res.set_content(quotaCheck.dump(), "application/json");
-        return;
-    }
-
 
   // Add owner info
     body["owner"] = userCtx.userId;
@@ -856,16 +873,7 @@ void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& 
 }
 
 
-void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {
-    // auto userCtx = getUserContext(req, userOps);
-    
-    // if (!userCtx.isAdmin) {
-    //     res.status = 403;
-    //     json error = {{"success", false}, {"error", "Admin access required"}};
-    //     res.set_content(error.dump(), "application/json");
-    //     return;
-    // }
-    
+void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {   
     json body;
     try {
         body = json::parse(req.body);
@@ -919,9 +927,11 @@ void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response&
     }
 
     std::string username = req.matches[1];
+
+    auto re = vmOps->deleteAllVMs(username);
     json result = userOps->deleteUser(username);
     
-    if (!result["success"].get<bool>()) {
+    if (!result["success"].get<bool>() && re) {
         res.status = 400;
     }
     
@@ -948,35 +958,4 @@ void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Respons
     
     res.set_content(result.dump(), "application/json");
 
-}
-
-void APIRoutes::handleUpdateQuotas(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req, userOps);
-    
-    if (!userCtx.isAdmin) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Admin access required"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    
-    std::string username = req.matches[1];
-    
-    json body;
-    try {
-        body = json::parse(req.body);
-    } catch (...) {
-        res.status = 400;
-        json error = {{"success", false}, {"error", "Invalid JSON"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    
-    json result = userOps->updateUserQuotas(username, body);
-    
-    if (!result["success"].get<bool>()) {
-        res.status = 400;
-    }
-    
-    res.set_content(result.dump(), "application/json");
 }

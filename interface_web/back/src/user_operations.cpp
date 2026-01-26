@@ -182,12 +182,6 @@ json UserOperations::createUser(const json& userData) {
         {"email", userData.value("email", "")},
         {"firstName", userData.value("firstName", "")},
         {"lastName", userData.value("lastName", "")},
-        {"quotas", {
-            {"maxVMs", userData.value("maxVMs", 5)},
-            {"maxCPU", userData.value("maxCPU", 8)},
-            {"maxRAM", userData.value("maxRAM", 16)},
-            {"maxStorage", userData.value("maxStorage", 100)}
-        }},
         {"usage", {
             {"vms", 0},
             {"cpu", 0},
@@ -207,98 +201,6 @@ json UserOperations::createUser(const json& userData) {
     } else {
         result["error"] = "Failed to save user";
     }
-    
-    return result;
-}
-
-json UserOperations::checkUserQuota(const std::string& username, const json& vmRequest) {
-    json result;
-    result["allowed"] = false;
-    
-    auto userResult = getUser(username);
-    if (!userResult["success"].get<bool>()) {
-        result["error"] = "User not found";
-        return result;
-    }
-    
-    json user = userResult["user"];
-    auto usage = getUserUsage(username);
-    
-    if (!usage["success"].get<bool>()) {
-        result["error"] = "Could not get usage";
-        return result;
-    }
-    
-    // Extract requested resources
-    int requestedVCPU = vmRequest["vcpus"].get<int>();
-    int requestedRAM = vmRequest["memory"].get<int>();
-    int requestedDisk = vmRequest["disk"].get<int>();
-    
-    // Current usage
-    int currentVMs = usage["usage"]["vms"].get<int>();
-    int currentCPU = usage["usage"]["cpu"].get<int>();
-    int currentRAM = usage["usage"]["ram"].get<int>();
-    long long currentStorage = usage["usage"]["storage"].get<long long>();
-    
-    // Quotas
-    int maxVMs = user["quotas"]["maxVMs"].get<int>();
-    int maxCPU = user["quotas"]["maxCPU"].get<int>();
-    int maxRAM = user["quotas"]["maxRAM"].get<int>();
-    long long maxStorage = user["quotas"]["maxStorage"].get<long long>() * 1024LL * 1024LL * 1024LL; // GB to bytes
-    
-    // Check each quota
-    if (currentVMs + 1 > maxVMs) {
-        result["error"] = "VM quota exceeded";
-        result["details"] = {
-            {"current", currentVMs},
-            {"requested", 1},
-            {"max", maxVMs},
-            {"resource", "VMs"}
-        };
-        return result;
-    }
-    
-    if (currentCPU + requestedVCPU > maxCPU) {
-        result["error"] = "CPU quota exceeded";
-        result["details"] = {
-            {"current", currentCPU},
-            {"requested", requestedVCPU},
-            {"max", maxCPU},
-            {"resource", "vCPUs"}
-        };
-        return result;
-    }
-    
-    if (currentRAM + requestedRAM > maxRAM) {
-        result["error"] = "RAM quota exceeded";
-        result["details"] = {
-            {"current", currentRAM},
-            {"requested", requestedRAM},
-            {"max", maxRAM},
-            {"resource", "Memory (MB)"}
-        };
-        return result;
-    }
-    
-    long long requestedStorageBytes = (long long)requestedDisk * 1024LL * 1024LL * 1024LL;
-    if (currentStorage + requestedStorageBytes > maxStorage) {
-        result["error"] = "Storage quota exceeded";
-        result["details"] = {
-            {"current", currentStorage / (1024*1024*1024)},
-            {"requested", requestedDisk},
-            {"max", maxStorage / (1024*1024*1024)},
-            {"resource", "Storage (GB)"}
-        };
-        return result;
-    }
-    
-    result["allowed"] = true;
-    result["remaining"] = {
-        {"vms", maxVMs - currentVMs - 1},
-        {"cpu", maxCPU - currentCPU - requestedVCPU},
-        {"ram", maxRAM - currentRAM - requestedRAM},
-        {"storage", (maxStorage - currentStorage - requestedStorageBytes) / (1024*1024*1024)}
-    };
     
     return result;
 }
@@ -343,14 +245,7 @@ json UserOperations::updateUser(const std::string& username, const json& updates
             }
             if (updates.contains("active")) {
                 user["active"] = updates["active"];
-            }
-            
-            // Update quotas
-            if (updates.contains("quotas")) {
-                for (auto& [key, value] : updates["quotas"].items()) {
-                    user["quotas"][key] = value;
-                }
-            }
+            }           
             
             if (saveUsers()) {
                 result["success"] = true;
@@ -388,11 +283,6 @@ json UserOperations::deleteUser(const std::string& username) {
     
     result["error"] = "User not found";
     return result;
-}
-
-json UserOperations::updateUserQuotas(const std::string& username, const json& quotas) {
-    json updates = {{"quotas", quotas}};
-    return updateUser(username, updates);
 }
 
 int UserOperations::listUserDomains(virDomainPtr **domains, 
@@ -497,19 +387,7 @@ json UserOperations::getUserUsage(const std::string& username) {
     saveUsers();
     
     result["success"] = true;
-    result["usage"] = (*userPtr)["usage"];
-    result["quotas"] = (*userPtr)["quotas"];
-    
-    // Calculate percentage used
-    json percentages = {
-        {"vms", (vmCount * 100.0) / (*userPtr)["quotas"]["maxVMs"].get<int>()},
-        {"cpu", (totalCPU * 100.0) / (*userPtr)["quotas"]["maxCPU"].get<int>()},
-        {"ram", (totalRAM * 100.0) / (*userPtr)["quotas"]["maxRAM"].get<int>()},
-        {"storage", (totalStorage * 100.0) / (*userPtr)["quotas"]["maxStorage"].get<int>()}
-    };
-    
-    result["percentages"] = percentages;
-    
+    result["usage"] = (*userPtr)["usage"];    
     return result;
 }
 
@@ -527,7 +405,6 @@ json UserOperations::getAllUsersUsage() {
                 {"username", username},
                 {"role", user["role"]},
                 {"usage", userUsage["usage"]},
-                {"quotas", userUsage["quotas"]},
                 {"percentages", userUsage["percentages"]}
             };
             result["users"].push_back(userData);
@@ -537,17 +414,3 @@ json UserOperations::getAllUsersUsage() {
     return result;
 }
 
-bool UserOperations::checkQuota(const std::string& username, 
-                               const std::string& resource, 
-                               int requestedAmount) {
-    for (const auto& user : users) {
-        if (user["username"] == username) {
-            int currentUsage = user["usage"][resource].get<int>();
-            int maxQuota = user["quotas"]["max" + resource].get<int>();
-            
-            return (currentUsage + requestedAmount) <= maxQuota;
-        }
-    }
-    
-    return false;
-}

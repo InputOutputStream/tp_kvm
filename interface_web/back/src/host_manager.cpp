@@ -6,7 +6,9 @@
 #include <iostream>
 
 HostManager::HostManager() 
-    : configFile("/var/lib/thoth-cloud/hosts.json") {
+    : configFile("/var/lib/thoth-cloud/hosts.json"),
+      strategy(HostSelectionStrategy::LEAST_USED),
+      roundRobinIndex(0) {
     loadHostsFromConfig();
 }
 
@@ -15,6 +17,42 @@ HostManager::~HostManager() {
         if (host.conn) {
             virConnectClose(host.conn);
         }
+    }
+}
+
+bool HostManager::setSelectionStrategy(int strat) {
+
+    switch(strat) {
+        case 0:
+            strategy = HostSelectionStrategy::LEAST_USED;
+            break;
+        case 1:
+            strategy = HostSelectionStrategy::ROUND_ROBIN;
+            break;
+        case 2:
+            strategy = HostSelectionStrategy::BEST_FIT;
+            break;
+        default: 
+            return false;
+    }
+
+    return true;
+}
+
+std::string HostManager::getSelectionStrategy() const {
+    switch(strategy) {
+        case HostSelectionStrategy::LEAST_USED:
+            return "LEAST_USED";
+            break;
+        case HostSelectionStrategy::ROUND_ROBIN:
+            return "ROUND_ROBIN";
+            break;
+        case HostSelectionStrategy::BEST_FIT:
+            return "BEST_FIT";
+            break;
+        default: 
+            return "LEAST_USED";
+            break;
     }
 }
 
@@ -152,36 +190,6 @@ bool HostManager::updateHostResources(HostInfo& host) {
     return true;
 }
 
-std::string HostManager::findBestHost(int requiredMemory, int requiredCPU, long long requiredDisk) {
-    std::string bestHost;
-    double bestScore = -1;
-    
-    for (auto& [id, host] : hosts) {
-        if (!host.active) continue;
-        
-        updateHostResources(host);
-        
-        // Check if host has enough resources
-        if (host.availableMemory < (unsigned long)(requiredMemory * 1024) ||
-            host.availableCPUs < requiredCPU ||
-            host.availableDisk < requiredDisk) {
-            continue;
-        }
-        
-        // Score: prefer hosts with more free resources
-        double score = (host.availableMemory / (double)host.totalMemory) * 0.4 +
-                      (host.availableCPUs / (double)host.totalCPUs) * 0.4 +
-                      (host.availableDisk / (double)host.totalDisk) * 0.2;
-        
-        if (score > bestScore) {
-            bestScore = score;
-            bestHost = id;
-        }
-    }
-    
-    return bestHost;
-}
-
 json HostManager::checkResourceAvailability(int memory, int cpu, long long disk) {
     json result;
     result["available"] = false;
@@ -311,4 +319,168 @@ HostInfo* HostManager::getHost(const std::string& hostId) {
     auto it = hosts.find(hostId);
     if (it == hosts.end()) return nullptr;
     return &it->second;
+}
+
+// Strategy 1: Least Used - Select host with most free resources
+std::string HostManager::selectByLeastUsed(int mem, int cpu, long long disk) {
+    std::string bestHost;
+    double bestScore = -1;
+    
+    std::cout << "\n=== LEAST_USED Strategy ===" << std::endl;
+    std::cout << "Finding host with most free resources..." << std::endl;
+    
+    for (auto& [id, host] : hosts) {
+        if (!host.active) continue;
+        
+        updateHostResources(host);
+        
+        // Check if host has enough resources
+        if (host.availableMemory < (unsigned long)(mem * 1024) ||
+            host.availableCPUs < cpu ||
+            host.availableDisk < disk) {
+            std::cout << "  ❌ " << id << ": Insufficient resources" << std::endl;
+            continue;
+        }
+        
+        // Score based on percentage of free resources (higher is better)
+        double memScore = (host.availableMemory / (double)host.totalMemory) * 100;
+        double cpuScore = (host.availableCPUs / (double)host.totalCPUs) * 100;
+        double diskScore = (host.availableDisk / (double)host.totalDisk) * 100;
+        
+        // Weighted average: 40% memory, 40% CPU, 20% disk
+        double score = memScore * 0.4 + cpuScore * 0.4 + diskScore * 0.2;
+        
+        std::cout << "  📊 " << id << ": Score = " << score 
+                  << " (Mem: " << memScore << "%, CPU: " << cpuScore 
+                  << "%, Disk: " << diskScore << "%)" << std::endl;
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestHost = id;
+        }
+    }
+    
+    if (!bestHost.empty()) {
+        std::cout << "  ✅ Selected: " << bestHost << " (Score: " << bestScore << ")" << std::endl;
+    }
+    
+    return bestHost;
+}
+
+// Strategy 2: Round Robin - Rotate between available hosts
+std::string HostManager::selectByRoundRobin(int mem, int cpu, long long disk) {
+    std::cout << "\n=== ROUND_ROBIN Strategy ===" << std::endl;
+    std::cout << "Rotating between hosts (starting at index " << roundRobinIndex << ")..." << std::endl;
+    
+    if (hosts.empty()) return "";
+    
+    // Build vector of host IDs
+    std::vector<std::string> hostIds;
+    for (const auto& [id, host] : hosts) {
+        if (host.active) {
+            hostIds.push_back(id);
+        }
+    }
+    
+    if (hostIds.empty()) return "";
+    
+    // Start from current round robin index
+    size_t attempts = 0;
+    while (attempts < hostIds.size()) {
+        size_t currentIndex = (roundRobinIndex + attempts) % hostIds.size();
+        std::string hostId = hostIds[currentIndex];
+        auto& host = hosts[hostId];
+        
+        updateHostResources(host);
+        
+        // Check if this host can accommodate
+        if (host.availableMemory >= (unsigned long)(mem * 1024) &&
+            host.availableCPUs >= cpu &&
+            host.availableDisk >= disk) {
+            
+            std::cout << "  ✅ Selected: " << hostId << " (index " << currentIndex << ")" << std::endl;
+            
+            // Update round robin index for next time
+            roundRobinIndex = (currentIndex + 1) % hostIds.size();
+            
+            return hostId;
+        }
+        
+        std::cout << "  ❌ " << hostId << ": Insufficient resources, trying next..." << std::endl;
+        attempts++;
+    }
+    
+    std::cout << "  ❌ No suitable host found after checking all hosts" << std::endl;
+    return "";
+}
+
+// Strategy 3: Best Fit - Select host that best matches the requested resources
+std::string HostManager::selectByBestFit(int mem, int cpu, long long disk) {
+    std::string bestHost;
+    double bestFit = std::numeric_limits<double>::max();
+    
+    std::cout << "\n=== BEST_FIT Strategy ===" << std::endl;
+    std::cout << "Finding host that best matches requested resources..." << std::endl;
+    
+    for (auto& [id, host] : hosts) {
+        if (!host.active) continue;
+        
+        updateHostResources(host);
+        
+        // Check if host has enough resources
+        if (host.availableMemory < (unsigned long)(mem * 1024) ||
+            host.availableCPUs < cpu ||
+            host.availableDisk < disk) {
+            std::cout << "  ❌ " << id << ": Insufficient resources" << std::endl;
+            continue;
+        }
+        
+        // Calculate "waste" - how much extra capacity would remain
+        double memWaste = (host.availableMemory / 1024.0 - mem) / (double)host.totalMemory;
+        double cpuWaste = (host.availableCPUs - cpu) / (double)host.totalCPUs;
+        double diskWaste = (host.availableDisk - disk) / (double)host.totalDisk;
+        
+        // Lower waste score is better (we want to minimize leftover resources)
+        double wasteScore = memWaste * 0.4 + cpuWaste * 0.4 + diskWaste * 0.2;
+        
+        std::cout << "  📊 " << id << ": Waste Score = " << wasteScore 
+                  << " (lower is better)" << std::endl;
+        
+        if (wasteScore < bestFit) {
+            bestFit = wasteScore;
+            bestHost = id;
+        }
+    }
+    
+    if (!bestHost.empty()) {
+        std::cout << "  ✅ Selected: " << bestHost << " (Waste Score: " << bestFit << ")" << std::endl;
+    }
+    
+    return bestHost;
+}
+
+// Modified findBestHost to use strategy
+std::string HostManager::findBestHost(int requiredMemory, int requiredCPU, 
+                                     long long requiredDisk,
+                                     HostSelectionStrategy customStrategy) {
+    HostSelectionStrategy strategyToUse = customStrategy;
+    
+    // If no custom strategy specified, use the configured one
+    if (customStrategy == strategy) {
+        strategyToUse = strategy;
+    }
+    
+    switch(strategyToUse) {
+        case HostSelectionStrategy::LEAST_USED:
+            return selectByLeastUsed(requiredMemory, requiredCPU, requiredDisk);
+            
+        case HostSelectionStrategy::ROUND_ROBIN:
+            return selectByRoundRobin(requiredMemory, requiredCPU, requiredDisk);
+            
+        case HostSelectionStrategy::BEST_FIT:
+            return selectByBestFit(requiredMemory, requiredCPU, requiredDisk);
+            
+        default:
+            return selectByLeastUsed(requiredMemory, requiredCPU, requiredDisk);
+    }
 }

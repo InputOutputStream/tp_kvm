@@ -1490,7 +1490,50 @@ bool VMOperations::deleteDiskFiles(const std::vector<std::string>& diskPaths) {
 // DELETE METHODS
 // ========================================
 
-json VMOperations::deleteVM(const std::string& name, bool removeDisks) {
+bool VMOperations::deleteAllVMs(std::string& username)
+{
+    if (!conn) {
+        return false;
+    }
+    
+    virDomainPtr* domains;
+    int numDomains = virConnectListAllDomains(conn, &domains, 0);
+    
+    if (numDomains < 0) {
+        return false;
+    }
+    
+    VMNameManager nameManager;
+    json vms = json::array();
+    
+    for (int i = 0; i < numDomains; i++) {
+        const char* name = virDomainGetName(domains[i]);
+        
+        // Check if VM belongs to user
+        if (nameManager.isOwner(name, username)) {
+            virDomainInfo info;
+            virDomainGetInfo(domains[i], &info);
+            
+            int id = virDomainGetID(domains[i]);
+            std::string state = getStateString(info.state);
+            bool isRunning = (info.state == VIR_DOMAIN_RUNNING);
+            
+            // Parse name to get display name
+            auto nameInfo = nameManager.parseVMName(name);
+            std::string displayName = nameInfo.valid ? nameInfo.vmName : name;
+            
+           deleteVM(displayName, true);
+        }
+        virDomainFree(domains[i]);
+    }
+    
+    free(domains);
+    
+    return true;    
+}
+
+
+json VMOperations::deleteVM(const std::string& name, bool removeDisks=true) {
     json result;
     result["success"] = false;
     result["steps"] = json::array();
@@ -1499,12 +1542,7 @@ json VMOperations::deleteVM(const std::string& name, bool removeDisks) {
         result["error"] = "Not connected to libvirt";
         return result;
     }
-    
-    fprintf(stdout, "\n========================================\n");
-    fprintf(stdout, "Starting deletion process for VM: %s\n", name.c_str());
-    fprintf(stdout, "Remove disks: %s\n", removeDisks ? "YES" : "NO");
-    fprintf(stdout, "========================================\n\n");
-    
+      
     // Step 1: Lookup domain
     virDomainPtr domain = virDomainLookupByName(conn, name.c_str());
     if (!domain) {
@@ -1545,7 +1583,6 @@ json VMOperations::deleteVM(const std::string& name, bool removeDisks) {
     if (!deleteAllSnapshots(domain)) {
         result["warning"] = "Some snapshots could not be deleted";
         result["steps"].push_back("WARNING: Some snapshots failed to delete");
-        // Continue anyway, as this is not critical
     } else {
         result["steps"].push_back("Snapshots deleted successfully");
     }

@@ -12,10 +12,15 @@
 #include "../include/resource_logger.hpp"
 #include "../include/paas_operations.hpp"
 #include "../include/swarm_operations.hpp"
+#include "../include/flavor_manager.hpp"
+#include "../include/network_manager.hpp"
+#include "../include/baseimage_manager.hpp"
 
 using namespace httplib;
 
 int main() {
+
+    FlavorManager flavorMgr;
     ConfigManager config;
     ResourceLogger logger;
     logger.logSystemEvent(LogLevel::INFO, "Starting THOTH CLOUD server");
@@ -48,13 +53,17 @@ int main() {
     virConnectPtr primaryConn = hostManager.getConnection(primaryHostId);
     
     VMOperations vmOps(primaryConn, &hostManager);
-
+    NetworkManager networkMgr(primaryConn);
+    RemoteExec::RemoteExecutor remoteExec(primaryConn);
+    BaseImageManager imageMgr(&remoteExec);
+    FlavorManager flvMgr;
     UserOperations userOps(primaryConn);
     PaaSOperations paasOps(primaryConn);
-    SwarmOperations swarmOps(primaryConn);
+    SwarmOperations swarmOps(primaryConn, &vmOps, &networkMgr);
 
     // Initialize routes with all dependencies
-    APIRoutes apiRoutes(&vmOps, &hostManager, &userOps, &paasOps, &swarmOps, &logger);
+    APIRoutes apiRoutes(&vmOps, &hostManager, &userOps, &paasOps, 
+        &swarmOps, &logger, &flvMgr, &networkMgr, &imageMgr);
     
     // Create server
     Server svr;
