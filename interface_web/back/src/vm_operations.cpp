@@ -3,6 +3,7 @@
 #include "../include/validation.hpp"
 #include "../include/remote_executor.hpp"
 #include "../include/host_manager.hpp"
+#include "../include/baseimage_manager.hpp"
 
 #include <regex>
 #include <fstream>
@@ -12,7 +13,8 @@
 #include <sys/stat.h>
 #include <libvirt/virterror.h>
 
-VMOperations::VMOperations(virConnectPtr connection, HostManager *hostMgr) : conn(connection), hostManager(hostMgr){}
+VMOperations::VMOperations(virConnectPtr connection, HostManager *hostMgr, NetworkManager *netMgr)
+ : conn(connection), hostManager(hostMgr), networkManager(netMgr){}
 
 std::string VMOperations::getStateString(int state) {
     const char* states[] = {"no state", "running", "blocked", "paused", 
@@ -514,29 +516,48 @@ bool VMOperations::validateRemoteTools(RemoteExec::RemoteExecutor& remoteExec) {
     return true;
 }
 
-bool VMOperations::validateBaseImage(RemoteExec::RemoteExecutor& remoteExec) {
+bool VMOperations::validateBaseImage(RemoteExec::RemoteExecutor& remoteExec, 
+                                     const std::string& baseImageId) {
     fprintf(stdout, "\n🔍 Validating base image on target host...\n");
+    fprintf(stdout, "   Requested image: %s\n", baseImageId.c_str());
     
-    std::string baseImagePath = "/var/lib/libvirt/images/baseimg/ubuntu-22.04-server-cloudimg-amd64.img";
+    // Create BaseImageManager to discover available images
+    BaseImageManager imageManager(&remoteExec);
     
-    if (!remoteExec.fileExists(baseImagePath)) {
-        fprintf(stderr, "❌ Base image not found on target host: %s\n", baseImagePath.c_str());
-        fprintf(stderr, "\n📥 On the target host, download the base image:\n");
-        fprintf(stderr, "   cd /var/lib/libvirt/images/baseimg\n");
-        fprintf(stderr, "   sudo wget https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img \\\n");
-        fprintf(stderr, "        -O ubuntu-22.04-server-cloudimg-amd64.img\n");
-        fprintf(stderr, "\nOr run the setup script on the target host:\n");
-        fprintf(stderr, "   sudo bash setup-base-images.sh\n");
+    // Check if requested image is available
+    if (!imageManager.isImageAvailable(baseImageId)) {
+        fprintf(stderr, "❌ Base image '%s' not found on target host\n", baseImageId.c_str());
+        
+        // List available images
+        auto imagesList = imageManager.listImages();
+        if (imagesList["count"].get<int>() > 0) {
+            fprintf(stderr, "\n📋 Available base images:\n");
+            for (const auto& img : imagesList["images"]) {
+                fprintf(stderr, "   - %s (%s)\n", 
+                        img["id"].get<std::string>().c_str(),
+                        img["displayName"].get<std::string>().c_str());
+            }
+        } else {
+            fprintf(stderr, "\n📥 No base images found. Download images to: %s\n", 
+                    imagesList["baseImageDir"].get<std::string>().c_str());
+        }
         return false;
     }
     
-    if (!remoteExec.isValidDiskImage(baseImagePath)) {
-        fprintf(stderr, "❌ Base image is corrupted or invalid: %s\n", baseImagePath.c_str());
-        fprintf(stderr, "   Re-download the image on the target host\n");
+    // Get image details
+    auto imageInfo = imageManager.getImage(baseImageId);
+    std::string imagePath = imageInfo["image"]["path"];
+    
+    // Verify image is valid
+    if (!remoteExec.isValidDiskImage(imagePath)) {
+        fprintf(stderr, "❌ Base image is corrupted or invalid: %s\n", imagePath.c_str());
         return false;
     }
     
-    fprintf(stdout, "✅ Base image is valid: %s\n", baseImagePath.c_str());
+    fprintf(stdout, "✅ Base image is valid\n");
+    fprintf(stdout, "   Image: %s\n", imageInfo["image"]["displayName"].get<std::string>().c_str());
+    fprintf(stdout, "   Path: %s\n", imagePath.c_str());
+    
     return true;
 }
 
@@ -693,15 +714,27 @@ bool VMOperations::createCloudInitISO(RemoteExec::RemoteExecutor& remoteExec,
     fprintf(stdout, "Step 2/7: Creating cloud-init ISO...\n");
     
     std::string cloudInitDir = "/tmp/cloudinit-" + hostname;
-    std::string cloudInitPath = "/var/lib/libvirt/images/cloud-init-iso/" + hostname + "-cloudinit.iso";
-    
-    std::string createIsoCmd = "genisoimage -output " + cloudInitPath + 
-                               " -volid cidata -joliet -rock " + 
-                               cloudInitDir + "/user-data " + 
-                               cloudInitDir + "/meta-data 2>&1";
+    std::string cloudInitPath =
+    "/tmp/" + hostname + "-cloudinit.iso";
+
+    std::string createIsoCmd = "xorriso -as mkisofs "
+            "-output " + cloudInitPath +
+            " -volid cidata -joliet -rock " +
+            cloudInitDir + "/user-data " +
+            cloudInitDir + "/meta-data 2>&1";
     
     auto isoResult = remoteExec.execute(createIsoCmd);
-    
+
+    auto mvResult = remoteExec.execute(
+        "sudo mv " + cloudInitPath +
+        " /var/lib/libvirt/images/cloud-init-iso/"
+    );
+
+    if (!mvResult.success()) {
+        fprintf(stderr, "   ❌ Failed to move cloud-init ISO\n");
+        return false;
+    }
+
     if (!isoResult.success()) {
         fprintf(stderr, "   ❌ Failed to create cloud-init ISO: %s\n", isoResult.output.c_str());
         return false;
@@ -719,19 +752,26 @@ bool VMOperations::createCloudInitISO(RemoteExec::RemoteExecutor& remoteExec,
 // DISK OPERATIONS
 // ==========================================
 
-// This will be updated for ultiple image support
-// For now, chill with ubuntu
-
 bool VMOperations::copyBaseImage(RemoteExec::RemoteExecutor& remoteExec,
-                                 const std::string& hostname) {
+                                 const std::string& hostname,
+                                 const std::string& baseImageId) {
     fprintf(stdout, "Step 3/7: Copying base cloud image...\n");
     
-    std::string baseImagePath = "/var/lib/libvirt/images/baseimg/ubuntu-22.04-server-cloudimg-amd64.img";
+    // Use BaseImageManager to get the actual image path
+    BaseImageManager imageManager(&remoteExec);
+    std::string baseImagePath = imageManager.getImagePath(baseImageId);
+    
+    if (baseImagePath.empty()) {
+        fprintf(stderr, "   ❌ Failed to locate base image: %s\n", baseImageId.c_str());
+        return false;
+    }
+    
+    fprintf(stdout, "   Using image: %s\n", baseImagePath.c_str());
+    
     std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
+    std::string copyCmd = "sudo cp " + baseImagePath + " " + diskPath;
     
-    std::string copyCmd = "cp " + baseImagePath + " " + diskPath;
     auto copyResult = remoteExec.execute(copyCmd);
-    
     if (!copyResult.success()) {
         fprintf(stderr, "   ❌ Failed to copy base image: %s\n", copyResult.output.c_str());
         return false;
@@ -746,8 +786,8 @@ bool VMOperations::resizeDisk(RemoteExec::RemoteExecutor& remoteExec,
     fprintf(stdout, "📝 Step 4/7: Resizing disk to %dGB...\n", diskGB);
     
     std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
-    std::string resizeCmd = "qemu-img resize " + diskPath + " " + std::to_string(diskGB) + "G";
-    
+    std::string resizeCmd = "sudo qemu-img resize  " + diskPath + "  +" + std::to_string(diskGB) + "G";
+
     auto resizeResult = remoteExec.execute(resizeCmd);
     
     if (!resizeResult.success()) {
@@ -767,6 +807,9 @@ std::string VMOperations::generateDomainXML(const json& vmParams) {
     std::string hostname = vmParams["hostname"];
     int memory = vmParams["memory"];
     int vcpus = vmParams["vcpus"];
+    
+    // Get network from parameters, default to 'default'
+    std::string network = vmParams.value("network", "default");
     
     std::string diskPath = "/var/lib/libvirt/images/" + hostname + ".qcow2";
     std::string cloudInitPath = "/var/lib/libvirt/images/cloud-init-iso/" + hostname + "-cloudinit.iso";
@@ -804,7 +847,7 @@ std::string VMOperations::generateDomainXML(const json& vmParams) {
               << "      <readonly/>"
               << "    </disk>"
               << "    <interface type='network'>"
-              << "      <source network='default'/>"
+              << "      <source network='" << network << "'/>"  
               << "      <model type='virtio'/>"
               << "    </interface>"
               << "    <serial type='pty'>"
@@ -818,11 +861,34 @@ std::string VMOperations::generateDomainXML(const json& vmParams) {
               << "    <channel type='unix'>"
               << "      <target type='virtio' name='org.qemu.guest_agent.0'/>"
               << "    </channel>"
-              << "    <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'/>"
+              << "    <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'>"
+              << "      <listen type='address' address='0.0.0.0'/>"
+              << "    </graphics>"
               << "  </devices>"
               << "</domain>";
     
     return xmlConfig.str();
+}
+
+std::string VMOperations::generateVNCSessionToken()
+{
+    static int session_no = 0;
+    std::string tok = "vnc" + std::to_string(session_no) + "__" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    session_no ++;
+    return tok;
+}
+
+json VMOperations::generateVNCToken(int vncPort, json result)
+{
+    std::string vncToken = generateVNCSessionToken();
+    std::string tokenFile = "/var/lib/thoth-cloud/novnc/tokens";
+
+    // Write token: token: host:port
+    std::ofstream tokens(tokenFile, std::ios::app);
+    tokens << vncToken << ": localhost:" << vncPort << "\n";
+    tokens.close();
+
+    return result["vnc"]["token"] = vncToken;
 }
 
 bool VMOperations::startVM(virDomainPtr domain) {
@@ -878,7 +944,6 @@ void VMOperations::printConfiguration(const json& vmParams) {
 
 bool VMOperations::deployVM(const json& vmParams) {
     try {
-        // TO DO: Add Multihost
     
         // Select optimal host
         auto hostSelection = selectOptimalHost(vmParams);
@@ -900,11 +965,12 @@ bool VMOperations::deployVM(const json& vmParams) {
         if (!validateInputParameters(vmParams)) return false;
         
         std::string hostname = vmParams["hostname"];
-        
+        std::string baseImageId = vmParams.value("baseImage", "");
+
         if (!validateVMNameAvailability(hostname)) return false;
         if (!validateRemoteDirectories(remoteExec)) return false;
         if (!validateRemoteTools(remoteExec)) return false;
-        if (!validateBaseImage(remoteExec)) return false;
+        if (!validateBaseImage(remoteExec, baseImageId)) return false;
         if (!validateDiskSpace(remoteExec, vmParams["disk"])) return false;
         if (!validateNetwork()) return false;
         
@@ -913,6 +979,24 @@ bool VMOperations::deployVM(const json& vmParams) {
         
         // Create cloud-init configuration
         auto cloudInitConfig = createCloudInitConfig(vmParams);
+
+        // Get base image ID from parameters (default to first available if not specified)
+     
+        // If no image specified, try to auto-select
+        if (baseImageId.empty()) {
+            BaseImageManager imageManager(&remoteExec);
+            auto imagesList = imageManager.listImages();
+            
+            if (imagesList["count"].get<int>() == 0) {
+                fprintf(stderr, "❌ No base images available on target host\n");
+                return false;
+            }
+            
+            // Use first available image
+            baseImageId = imagesList["images"][0]["id"];
+            fprintf(stdout, "ℹ️  No base image specified, using: %s\n", 
+                    imagesList["images"][0]["displayName"].get<std::string>().c_str());
+        }
         
         // Handle password hashing if needed
         if (vmParams.value("authMethod", "password") == "password" && 
@@ -936,7 +1020,7 @@ bool VMOperations::deployVM(const json& vmParams) {
         // Deployment phase
         if (!writeCloudInitFiles(remoteExec, hostname, cloudInitConfig)) return false;
         if (!createCloudInitISO(remoteExec, hostname)) return false;
-        if (!copyBaseImage(remoteExec, hostname)) return false;
+        if (!copyBaseImage(remoteExec, hostname, baseImageId)) return false;
         if (!resizeDisk(remoteExec, hostname, vmParams["disk"])) return false;
         
         // Create and start VM
@@ -1021,25 +1105,56 @@ json VMOperations::getVNCInfo(const std::string& name) {
         return result;
     }
     
+    // Check if VM is running
+    virDomainInfo info;
+    if (virDomainGetInfo(domain, &info) < 0 || info.state != VIR_DOMAIN_RUNNING) {
+        result["error"] = "VM is not running";
+        virDomainFree(domain);
+        return result;
+    }
+    
+    // Get VNC port from domain XML
     char* xmlDesc = virDomainGetXMLDesc(domain, 0);
+    if (!xmlDesc) {
+        result["error"] = "Failed to get VM configuration";
+        virDomainFree(domain);
+        return result;
+    }
+    
     std::string xml(xmlDesc);
     free(xmlDesc);
-    virDomainFree(domain);
     
-    std::regex portRegex("<graphics type='vnc' port='(\\d+)'");
+    // Parse VNC port from XML
+    // Look for: <graphics type='vnc' port='5900' .../>
+    std::regex vncRegex("<graphics type='vnc' port='([0-9]+)'");
     std::smatch match;
     
-    if (std::regex_search(xml, match, portRegex) && match[1].str() != "-1") {
-        int port = std::stoi(match[1].str());
-        std::string display = ":" + std::to_string(port - 5900);
-        
-        result["success"] = true;
-        result["display"] = display;
-        result["port"] = port;
-        result["host"] = "localhost";
-    } else {
-        result["error"] = "VNC not configured or VM not running";
+    int vncPort = -1;
+    if (std::regex_search(xml, match, vncRegex)) {
+        vncPort = std::stoi(match[1].str());
     }
+    
+    virDomainFree(domain);
+    
+    if (vncPort == -1) {
+        result["error"] = "VNC not configured for this VM";
+        return result;
+    }
+    
+    // Get hostname
+    char* hostname = virConnectGetHostname(conn);
+    std::string host = hostname ? std::string(hostname) : "localhost";
+    if (hostname) free(hostname);
+    
+    result["success"] = true;
+    result["vnc"] = {
+        {"host", host},
+        {"port", vncPort},
+        {"display", vncPort - 5900},
+        {"websocketUrl", "ws://" + host + ":6080"},
+        {"token", ""},  
+        {"password", ""}  
+    };
     
     return result;
 }
@@ -1074,13 +1189,13 @@ json VMOperations::getIP(const std::string& name) {
     ifaces_count = virDomainInterfaceAddresses(domain, &ifaces, 
                                                VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE, 0);
     
-    // If LEASE source fails, try AGENT (requires qemu-guest-agent in VM)
+    // If LEASE source fails, try AGENT 
     if (ifaces_count < 0) {
         ifaces_count = virDomainInterfaceAddresses(domain, &ifaces,
                                                    VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT, 0);
     }
     
-    // If both fail, try ARP (less reliable)
+    // If both fail, try ARP 
     if (ifaces_count < 0) {
         ifaces_count = virDomainInterfaceAddresses(domain, &ifaces,
                                                    VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_ARP, 0);
@@ -1444,11 +1559,13 @@ std::vector<std::string> VMOperations::getDiskPaths(virDomainPtr domain) {
         std::string diskPath = match[1].str();
         
         // Skip ISO files and cloud-init ISOs (they're typically temporary)
-        if (diskPath.find(".iso") == std::string::npos || 
-            diskPath.find("cloud-init") != std::string::npos) {
-            diskPaths.push_back(diskPath);
-            fprintf(stdout, "Found disk: %s\n", diskPath.c_str());
+        if (diskPath.find(".iso") != std::string::npos && 
+            diskPath.find("cloud-init") == std::string::npos) {
+            // Skip regular ISO files
+            continue;
         }
+        diskPaths.push_back(diskPath);
+        fprintf(stdout, "Found disk: %s\n", diskPath.c_str());
         
         ++iter;
     }
@@ -1462,21 +1579,28 @@ bool VMOperations::deleteDiskFiles(const std::vector<std::string>& diskPaths) {
         return true;
     }
     
+    // Check if we're on remote host
+    RemoteExec::RemoteExecutor remoteExec(conn);
+    
     bool allSuccess = true;
     
     for (const auto& diskPath : diskPaths) {
-        // Check if file exists
-        struct stat buffer;
-        if (stat(diskPath.c_str(), &buffer) != 0) {
-            fprintf(stdout, "Disk file does not exist (already deleted?): %s\n", diskPath.c_str());
+        fprintf(stdout, "Deleting disk file: %s\n", diskPath.c_str());
+        
+        // Check if file exists (works for local and remote)
+        if (!remoteExec.fileExists(diskPath)) {
+            fprintf(stdout, "Disk file does not exist (already deleted?): %s\n", 
+                    diskPath.c_str());
             continue;
         }
         
-        fprintf(stdout, "Deleting disk file: %s\n", diskPath.c_str());
+        // Delete file using remote executor
+        std::string deleteCmd = "rm -f \"" + diskPath + "\"";
+        auto result = remoteExec.execute(deleteCmd);
         
-        if (unlink(diskPath.c_str()) != 0) {
+        if (!result.success()) {
             fprintf(stderr, "Failed to delete disk file: %s (error: %s)\n", 
-                    diskPath.c_str(), strerror(errno));
+                    diskPath.c_str(), result.output.c_str());
             allSuccess = false;
         } else {
             fprintf(stdout, "Successfully deleted: %s\n", diskPath.c_str());
@@ -1662,4 +1786,20 @@ bool VMOperations::undefineVM(const std::string& name) {
     
     virDomainFree(domain);
     return result >= 0;
+}
+
+
+bool VMOperations::validateNetwork(const std::string& networkName, 
+                                  const std::string& username) {
+    if (!networkManager) return false;
+    
+    auto networks = networkManager->getUserNetworks(username);
+    for (const auto& net : networks["networks"]) {
+        if (net["networkName"] == networkName) {
+            return true;
+        }
+    }
+    
+    // Check if it's default network
+    return networkName == "default";
 }

@@ -147,12 +147,7 @@ void BaseImageManager::scanBaseImages() {
         
         BaseImage img = parseImageInfo(filename, line);
         images[img.id] = img;
-        
-        std::cout << "Found image: " << img.displayName 
-                  << " [" << (img.available ? "OK" : "INVALID") << "]" << std::endl;
-    }
-    
-    std::cout << "Total images found: " << images.size() << std::endl;
+    }   
 }
 
 void BaseImageManager::refresh() {

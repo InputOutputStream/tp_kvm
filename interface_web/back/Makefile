@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -g -std=c++17 -Wall -Wextra 
+CXXFLAGS = -g -std=c++17 -Wall -Wextra  
 LDFLAGS = -lvirt -lpthread -lssl -lcrypto
 
 # Directories

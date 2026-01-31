@@ -16,7 +16,7 @@ void addHeaders(httplib::Response& res, const std::string& origin = "*") {
     // Only set headers if they haven't been set already
     if (res.get_header_value("Access-Control-Allow-Origin").empty()) {
         res.set_header("Access-Control-Allow-Origin", origin);
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Role"); 
 

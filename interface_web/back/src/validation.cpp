@@ -14,7 +14,7 @@ namespace Validation {
 // ==========================================
 
 bool Validator::isValidHostnameChar(char c) {
-    return std::isalnum(c) || c == '-' || c == '.';
+    return std::isalnum(c) || c == '-' || c == '.' || c == '_';
 }
 
 ValidationResult Validator::validateHostname(const std::string& hostname) {

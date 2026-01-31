@@ -1,9 +1,12 @@
 #include "../include/network_manager.hpp"
+#include <libvirt/virterror.h>
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
 #include <iostream>
 #include <regex>
+#include <random>
+#include <chrono>
 
 NetworkManager::NetworkManager(virConnectPtr connection) 
     : conn(connection), networksConfigFile("/var/lib/thoth-cloud/networks.json") {
@@ -17,20 +20,67 @@ NetworkManager::~NetworkManager() {
 void NetworkManager::loadNetworksConfig() {
     std::ifstream file(networksConfigFile);
     if (file.is_open()) {
+        // Check if file is empty
+        file.seekg(0, std::ios::end);
+        if (file.tellg() == 0) {
+            // File is empty, initialize with default structure
+            networksConfig = json::object();
+            networksConfig["userNetworks"] = json::array();
+            networksConfig["swarmNetworks"] = json::array();
+            networksConfig["usedSubnets"] = json::array();
+            file.close();
+            return;
+        }
+        
+        file.seekg(0, std::ios::beg); // Reset to beginning
         try {
             file >> networksConfig;
+            
+            // Ensure all required fields exist
+            if (!networksConfig.contains("userNetworks")) {
+                networksConfig["userNetworks"] = json::array();
+            }
+            if (!networksConfig.contains("swarmNetworks")) {
+                networksConfig["swarmNetworks"] = json::array();
+            }
+            if (!networksConfig.contains("usedSubnets")) {
+                networksConfig["usedSubnets"] = json::array();
+            }
+            
+            // Migrate old format if needed
+            if (networksConfig.contains("userNetworks") && 
+                !networksConfig["userNetworks"].is_array()) {
+                json oldUserNetworks = networksConfig["userNetworks"];
+                networksConfig["userNetworks"] = json::array();
+                
+                for (auto& [username, network] : oldUserNetworks.items()) {
+                    if (network.is_object()) {
+                        network["owner"] = username;
+                        network["type"] = "user";
+                        if (!network.contains("networkId")) {
+                            network["networkId"] = generateNetworkId();
+                        }
+                        if (!network.contains("displayName")) {
+                            network["displayName"] = "Network 1";
+                        }
+                        networksConfig["userNetworks"].push_back(network);
+                    }
+                }
+                saveNetworksConfig();
+            }
+            
         } catch (const std::exception& e) {
             std::cerr << "Error loading networks config: " << e.what() << std::endl;
             networksConfig = json::object();
-            networksConfig["userNetworks"] = json::object();
-            networksConfig["swarmNetworks"] = json::object();
+            networksConfig["userNetworks"] = json::array();
+            networksConfig["swarmNetworks"] = json::array();
             networksConfig["usedSubnets"] = json::array();
         }
         file.close();
     } else {
         networksConfig = json::object();
-        networksConfig["userNetworks"] = json::object();
-        networksConfig["swarmNetworks"] = json::object();
+        networksConfig["userNetworks"] = json::array();
+        networksConfig["swarmNetworks"] = json::array();
         networksConfig["usedSubnets"] = json::array();
     }
 }
@@ -49,46 +99,57 @@ bool NetworkManager::saveNetworksConfig() {
     return true;
 }
 
-std::string NetworkManager::generateSubnet(const std::string& username) {
-    // Generate subnet based on hash of username
-    // Use 10.x.y.0/24 range
-    std::hash<std::string> hasher;
-    size_t hash = hasher(username);
+std::string NetworkManager::generateNetworkId() {
+    // Generate unique network ID using timestamp + random
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count();
     
-    int x = 100 + (hash % 155);  // 10.100-255.x.0/24
-    int y = (hash / 256) % 256;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(1000, 9999);
     
-    std::string subnet = "10." + std::to_string(x) + "." + std::to_string(y) + ".0";
-    
-    // Check if already used
-    int attempt = 0;
-    while (!isSubnetAvailable(subnet) && attempt < 100) {
-        y = (y + 1) % 256;
-        subnet = "10." + std::to_string(x) + "." + std::to_string(y) + ".0";
-        attempt++;
-    }
-    
-    return subnet;
+    return "net_" + std::to_string(timestamp) + "_" + std::to_string(dis(gen));
 }
 
-std::string NetworkManager::generateSwarmSubnet(const std::string& clusterName) {
-    // Use 172.16-31.x.0/24 for swarm networks
-    std::hash<std::string> hasher;
-    size_t hash = hasher(clusterName);
+std::string NetworkManager::generateSubnet() {
+    // Generate subnet using 10.x.y.0/24 range for user networks
+    // and 172.16-31.x.0/24 for swarm networks
+    std::random_device rd;
+    std::mt19937 gen(rd());
     
-    int x = 16 + (hash % 16);  // 172.16-31.x.0/24
-    int y = (hash / 256) % 256;
+    // Try user network range first (10.100-255.x.0/24)
+    std::uniform_int_distribution<> x_dist(100, 255);
+    std::uniform_int_distribution<> y_dist(0, 255);
     
-    std::string subnet = "172." + std::to_string(x) + "." + std::to_string(y) + ".0";
-    
-    int attempt = 0;
-    while (!isSubnetAvailable(subnet) && attempt < 100) {
-        y = (y + 1) % 256;
-        subnet = "172." + std::to_string(x) + "." + std::to_string(y) + ".0";
-        attempt++;
+    int attempts = 0;
+    while (attempts < 1000) {
+        int x = x_dist(gen);
+        int y = y_dist(gen);
+        std::string subnet = "10." + std::to_string(x) + "." + std::to_string(y) + ".0";
+        
+        if (isSubnetAvailable(subnet)) {
+            return subnet;
+        }
+        attempts++;
     }
     
-    return subnet;
+    // Fallback: try swarm range (172.16-31.x.0/24)
+    std::uniform_int_distribution<> x2_dist(16, 31);
+    attempts = 0;
+    while (attempts < 1000) {
+        int x = x2_dist(gen);
+        int y = y_dist(gen);
+        std::string subnet = "172." + std::to_string(x) + "." + std::to_string(y) + ".0";
+        
+        if (isSubnetAvailable(subnet)) {
+            return subnet;
+        }
+        attempts++;
+    }
+    
+    std::cerr << "Failed to generate available subnet" << std::endl;
+    return "";
 }
 
 bool NetworkManager::isSubnetAvailable(const std::string& subnet) {
@@ -100,10 +161,74 @@ bool NetworkManager::isSubnetAvailable(const std::string& subnet) {
     return true;
 }
 
-std::string NetworkManager::generateUserNetworkXML(const std::string& username, const std::string& subnet) {
-    std::stringstream xml;
-    std::string networkName = "user_" + username;
+
+
+
+int NetworkManager::getUserNetworkCount(const std::string& username) {
+    int count = 0;
+    if (!networksConfig.contains("userNetworks") || !networksConfig["userNetworks"].is_array()) {
+        return 0;
+    }
     
+    for (const auto& network : networksConfig["userNetworks"]) {
+        if (network.contains("owner") && network["owner"] == username) {
+            count++;
+        }
+    }
+    return count;
+}
+
+int NetworkManager::getSwarmNetworkCount(const std::string& owner) {
+    int count = 0;
+    if (!networksConfig.contains("swarmNetworks") || !networksConfig["swarmNetworks"].is_array()) {
+        return 0;
+    }
+    
+    for (const auto& network : networksConfig["swarmNetworks"]) {
+        if (network.contains("owner") && network["owner"] == owner) {
+            count++;
+        }
+    }
+    return count;
+}
+
+std::string NetworkManager::sanitizeNetworkName(const std::string& name) {
+    // Remove special characters, keep only alphanumeric, dash, underscore
+    std::regex pattern("[^a-zA-Z0-9_-]");
+    std::string sanitized = std::regex_replace(name, pattern, "_");
+    
+    // Limit length
+    if (sanitized.length() > 30) {
+        sanitized = sanitized.substr(0, 30);
+    }
+    
+    return sanitized;
+}
+
+bool NetworkManager::bridgeExists(const std::string& bridgeName) {
+    std::string cmd = "ip link show " + bridgeName + " 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return false;
+    
+    char buffer[128];
+    bool exists = false;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        if (strstr(buffer, bridgeName.c_str()) != nullptr) {
+            exists = true;
+            break;
+        }
+    }
+    pclose(pipe);
+    return exists;
+}
+
+std::string NetworkManager::generateUserNetworkXML(const std::string& networkId,
+                                                   const std::string& displayName,
+                                                   const std::string& subnet) {
+    std::stringstream xml;
+    // std::string networkName = "user_" + networkId;
+    std::string networkName = displayName + networkId;
+
     // Extract subnet parts (10.x.y.0 -> 10.x.y)
     std::regex subnetRegex(R"((\d+\.\d+\.\d+)\.\d+)");
     std::smatch match;
@@ -112,11 +237,24 @@ std::string NetworkManager::generateUserNetworkXML(const std::string& username, 
     if (std::regex_match(subnet, match, subnetRegex)) {
         baseIP = match[1].str();
     }
+
+    // Generate unique bridge name
+    std::string bridgeName;
+    int attempt = 0;
+    do {
+        std::string suffix = std::to_string(std::hash<std::string>{}(networkId + std::to_string(attempt)));
+        bridgeName = "vbr" + suffix.substr(0, 8);
+        attempt++;
+    } while (bridgeName.length() > 15 && attempt < 10); // Linux bridge max 15 chars
     
+    if (bridgeName.length() > 15) {
+        bridgeName = bridgeName.substr(0, 15);
+    }
+ 
     xml << "<network>\n"
         << "  <name>" << networkName << "</name>\n"
         << "  <forward mode='nat'/>\n"
-        << "  <bridge name='virbr_" << username << "' stp='on' delay='0'/>\n"
+        << "  <bridge name='" << bridgeName << "' stp='on' delay='0'/>\n"
         << "  <ip address='" << baseIP << ".1' netmask='255.255.255.0'>\n"
         << "    <dhcp>\n"
         << "      <range start='" << baseIP << ".10' end='" << baseIP << ".250'/>\n"
@@ -127,10 +265,12 @@ std::string NetworkManager::generateUserNetworkXML(const std::string& username, 
     return xml.str();
 }
 
-std::string NetworkManager::generateSwarmNetworkXML(const std::string& clusterName, const std::string& subnet) {
+std::string NetworkManager::generateSwarmNetworkXML(const std::string& networkId,
+                                                    const std::string& displayName,
+                                                    const std::string& subnet) {
     std::stringstream xml;
-    std::string networkName = "swarm_" + clusterName;
-    
+    //    std::string networkName = "swarm_" + networkId;
+    std::string networkName = displayName + networkId;
     std::regex subnetRegex(R"((\d+\.\d+\.\d+)\.\d+)");
     std::smatch match;
     std::string baseIP;
@@ -139,10 +279,12 @@ std::string NetworkManager::generateSwarmNetworkXML(const std::string& clusterNa
         baseIP = match[1].str();
     }
     
+    std::string bridgeName = "vbrs" + networkId.substr(networkId.length() - 6);
+
     xml << "<network>\n"
         << "  <name>" << networkName << "</name>\n"
         << "  <forward mode='nat'/>\n"
-        << "  <bridge name='virbr_swarm_" << clusterName.substr(0, 8) << "' stp='on' delay='0'/>\n"
+        << "  <bridge name='" << bridgeName << "' stp='on' delay='0'/>\n"
         << "  <ip address='" << baseIP << ".1' netmask='255.255.255.0'>\n"
         << "    <dhcp>\n"
         << "      <range start='" << baseIP << ".10' end='" << baseIP << ".250'/>\n"
@@ -153,7 +295,7 @@ std::string NetworkManager::generateSwarmNetworkXML(const std::string& clusterNa
     return xml.str();
 }
 
-json NetworkManager::createUserNetwork(const std::string& username) {
+json NetworkManager::createUserNetwork(const std::string& username, const std::string& networkName) {
     json result;
     result["success"] = false;
     
@@ -162,21 +304,38 @@ json NetworkManager::createUserNetwork(const std::string& username) {
         return result;
     }
     
-    // Check if network already exists
-    std::string networkName = "user_" + username;
-    virNetworkPtr existingNet = virNetworkLookupByName(conn, networkName.c_str());
-    if (existingNet) {
-        virNetworkFree(existingNet);
-        result["error"] = "Network already exists for user";
-        result["networkName"] = networkName;
+    // Check network limit
+    int currentCount = getUserNetworkCount(username);
+    if (currentCount >= MAX_USER_NETWORKS) {
+        result["error"] = "Maximum network limit reached (" + std::to_string(MAX_USER_NETWORKS) + ")";
+        result["currentCount"] = currentCount;
+        result["maxAllowed"] = MAX_USER_NETWORKS;
         return result;
     }
     
+    // Generate unique network ID
+    std::string networkId = generateNetworkId();
+    
+    // Create display name
+    std::string displayName;
+    if (networkName.empty()) {
+        displayName = "Network " + std::to_string(currentCount + 1);
+    } else {
+        displayName = sanitizeNetworkName(networkName);
+    }
+    
     // Generate subnet
-    std::string subnet = generateSubnet(username);
+    std::string subnet = generateSubnet();
+    if (subnet.empty()) {
+        result["error"] = "Failed to generate available subnet";
+        return result;
+    }
     
     // Generate XML
-    std::string xml = generateUserNetworkXML(username, subnet);
+    std::string xml = generateUserNetworkXML(networkId, displayName, subnet);
+    
+    // Libvirt network name
+    std::string libvirtNetworkName = "user_" + networkId;
     
     // Define network
     virNetworkPtr network = virNetworkDefineXML(conn, xml.c_str());
@@ -190,24 +349,34 @@ json NetworkManager::createUserNetwork(const std::string& username) {
     
     // Start network
     if (virNetworkCreate(network) < 0) {
+        virNetworkUndefine(network);
         virNetworkFree(network);
         result["error"] = "Failed to start network";
         return result;
     }
     
     // Save to config
-    networksConfig["userNetworks"][username] = {
-        {"networkName", networkName},
+    json networkInfo = {
+        {"networkId", networkId},
+        {"networkName", libvirtNetworkName},
+        {"displayName", displayName},
         {"subnet", subnet},
-        {"created", std::time(nullptr)}
+        {"owner", username},
+        {"type", "user"},
+        {"created", std::time(nullptr)},
+        {"active", true}
     };
+    
+    networksConfig["userNetworks"].push_back(networkInfo);
     networksConfig["usedSubnets"].push_back(subnet);
     saveNetworksConfig();
     
     virNetworkFree(network);
     
     result["success"] = true;
-    result["networkName"] = networkName;
+    result["networkId"] = networkId;
+    result["networkName"] = libvirtNetworkName;
+    result["displayName"] = displayName;
     result["subnet"] = subnet;
     result["message"] = "User network created successfully";
     
@@ -223,17 +392,28 @@ json NetworkManager::createSwarmNetwork(const std::string& clusterName, const st
         return result;
     }
     
-    std::string networkName = "swarm_" + clusterName;
-    virNetworkPtr existingNet = virNetworkLookupByName(conn, networkName.c_str());
-    if (existingNet) {
-        virNetworkFree(existingNet);
-        result["error"] = "Swarm network already exists";
-        result["networkName"] = networkName;
+    // Check network limit
+    int currentCount = getSwarmNetworkCount(owner);
+    if (currentCount >= MAX_SWARM_NETWORKS) {
+        result["error"] = "Maximum swarm network limit reached";
         return result;
     }
     
-    std::string subnet = generateSwarmSubnet(clusterName);
-    std::string xml = generateSwarmNetworkXML(clusterName, subnet);
+    // Generate unique network ID
+    std::string networkId = generateNetworkId();
+    
+    // Sanitize cluster name for display
+    std::string displayName = "Swarm: " + sanitizeNetworkName(clusterName);
+    
+    // Generate subnet
+    std::string subnet = generateSubnet();
+    if (subnet.empty()) {
+        result["error"] = "Failed to generate available subnet";
+        return result;
+    }
+    
+    std::string xml = generateSwarmNetworkXML(networkId, displayName, subnet);
+    std::string libvirtNetworkName = "swarm_" + networkId;
     
     virNetworkPtr network = virNetworkDefineXML(conn, xml.c_str());
     if (!network) {
@@ -244,133 +424,234 @@ json NetworkManager::createSwarmNetwork(const std::string& clusterName, const st
     virNetworkSetAutostart(network, 1);
     
     if (virNetworkCreate(network) < 0) {
+        virNetworkUndefine(network);
         virNetworkFree(network);
         result["error"] = "Failed to start swarm network";
         return result;
     }
     
-    networksConfig["swarmNetworks"][clusterName] = {
-        {"networkName", networkName},
+    json networkInfo = {
+        {"networkId", networkId},
+        {"networkName", libvirtNetworkName},
+        {"displayName", displayName},
+        {"clusterName", clusterName},
         {"subnet", subnet},
         {"owner", owner},
-        {"created", std::time(nullptr)}
+        {"type", "swarm"},
+        {"created", std::time(nullptr)},
+        {"active", true}
     };
+    
+    networksConfig["swarmNetworks"].push_back(networkInfo);
     networksConfig["usedSubnets"].push_back(subnet);
     saveNetworksConfig();
     
     virNetworkFree(network);
     
     result["success"] = true;
-    result["networkName"] = networkName;
+    result["networkId"] = networkId;
+    result["networkName"] = libvirtNetworkName;
+    result["displayName"] = displayName;
     result["subnet"] = subnet;
     result["message"] = "Swarm network created successfully";
     
     return result;
 }
 
-json NetworkManager::getUserNetwork(const std::string& username) {
+json NetworkManager::getUserNetwork(const std::string& networkId) {
     json result;
     result["success"] = false;
     
-    if (networksConfig["userNetworks"].contains(username)) {
-        result["success"] = true;
-        result["network"] = networksConfig["userNetworks"][username];
-    } else {
-        result["error"] = "No network found for user";
+    for (const auto& network : networksConfig["userNetworks"]) {
+        if (network["networkId"] == networkId) {
+            result["success"] = true;
+            result["network"] = network;
+            return result;
+        }
     }
+    
+    result["error"] = "Network not found";
+    return result;
+}
+
+json NetworkManager::getUserNetworks(const std::string& username) {
+    json result;
+    result["success"] = true;
+    result["networks"] = json::array();
+    result["count"] = 0;
+    
+    for (const auto& network : networksConfig["userNetworks"]) {
+        if (network["owner"] == username) {
+            result["networks"].push_back(network);
+        }
+    }
+    
+    result["count"] = result["networks"].size();
+    result["maxAllowed"] = MAX_USER_NETWORKS;
     
     return result;
 }
 
-json NetworkManager::getSwarmNetwork(const std::string& clusterName) {
+json NetworkManager::getSwarmNetwork(const std::string& networkId) {
     json result;
     result["success"] = false;
     
-    if (networksConfig["swarmNetworks"].contains(clusterName)) {
-        result["success"] = true;
-        result["network"] = networksConfig["swarmNetworks"][clusterName];
-    } else {
-        result["error"] = "No network found for cluster";
+    for (const auto& network : networksConfig["swarmNetworks"]) {
+        if (network["networkId"] == networkId) {
+            result["success"] = true;
+            result["network"] = network;
+            return result;
+        }
     }
     
+    result["error"] = "Swarm network not found";
     return result;
 }
 
-bool NetworkManager::deleteUserNetwork(const std::string& username) {
-    if (!conn) return false;
+bool NetworkManager::deleteUserNetwork(const std::string& networkId, 
+                                      const std::string& username) {
+    // Find network in config
+    auto& userNetworks = networksConfig["userNetworks"];
     
-    std::string networkName = "user_" + username;
-    virNetworkPtr network = virNetworkLookupByName(conn, networkName.c_str());
+    int index = -1;
+    virNetworkPtr network = nullptr;
+    std::string networkName;
     
-    if (!network) return false;
-    
-    // Stop network if active
-    if (virNetworkIsActive(network)) {
-        virNetworkDestroy(network);
+    for (size_t i = 0; i < userNetworks.size(); i++) {
+        if (userNetworks[i]["networkId"] == networkId && 
+            userNetworks[i]["owner"] == username) {
+            index = i;
+            networkName = userNetworks[i]["networkName"];
+            break;
+        }
     }
     
-    // Undefine network
-    virNetworkUndefine(network);
-    virNetworkFree(network);
+    if (index == -1) {
+        std::cerr << "Network not found or not owned by user" << std::endl;
+        return false;
+    }
+    
+    // Get libvirt network
+    network = virNetworkLookupByName(conn, networkName.c_str());
+    if (network) {
+        // Stop network if running
+        if (virNetworkIsActive(network) == 1) {
+            std::cout << "Stopping network: " << networkName << std::endl;
+            if (virNetworkDestroy(network) < 0) {
+                std::cerr << "Warning: Failed to destroy network" << std::endl;
+            }
+        }
+        
+        // Remove network definition
+        std::cout << "Removing network definition: " << networkName << std::endl;
+        if (virNetworkUndefine(network) < 0) {
+            virErrorPtr err = virGetLastError();
+            std::cerr << "Failed to undefine network: " 
+                     << (err ? err->message : "unknown error") << std::endl;
+            virNetworkFree(network);
+            return false;
+        }
+        
+        virNetworkFree(network);
+        std::cout << "Network deleted from libvirt successfully" << std::endl;
+    } else {
+        std::cerr << "Warning: Network not found in libvirt (may be already deleted)" << std::endl;
+    }
+
+    // Remove from config
+    userNetworks.erase(index);
+    
+    // Remove subnet from used list
+    std::string subnet = userNetworks[index]["subnet"];
+    auto& usedSubnets = networksConfig["usedSubnets"];
+    for (size_t i = 0; i < usedSubnets.size(); i++) {
+        if (usedSubnets[i] == subnet) {
+            usedSubnets.erase(i);
+            break;
+        }
+    }
+    
+    saveNetworksConfig();
+    return true;
+}
+
+bool NetworkManager::deleteSwarmNetwork(const std::string& networkId) {
+    auto& swarmNetworks = networksConfig["swarmNetworks"];
+    
+    int index = -1;
+    virNetworkPtr network = nullptr;
+    std::string networkName;
+    
+    for (size_t i = 0; i < swarmNetworks.size(); i++) {
+        if (swarmNetworks[i]["networkId"] == networkId) {
+            index = i;
+            networkName = swarmNetworks[i]["networkName"];
+            break;
+        }
+    }
+    
+    if (index == -1) {
+        std::cerr << "Swarm network not found" << std::endl;
+        return false;
+    }
+    
+    // Get libvirt network
+    network = virNetworkLookupByName(conn, networkName.c_str());
+    if (network) {
+        if (virNetworkIsActive(network) == 1) {
+            virNetworkDestroy(network);
+        }
+        
+        if (virNetworkUndefine(network) < 0) {
+            virErrorPtr err = virGetLastError();
+            std::cerr << "Failed to undefine swarm network: " 
+                     << (err ? err->message : "unknown error") << std::endl;
+            virNetworkFree(network);
+            return false;
+        }
+        
+        virNetworkFree(network);
+    }
+    
     
     // Remove from config
-    if (networksConfig["userNetworks"].contains(username)) {
-        std::string subnet = networksConfig["userNetworks"][username]["subnet"];
-        
-        // Remove subnet from used list
-        auto& usedSubnets = networksConfig["usedSubnets"];
-        for (size_t i = 0; i < usedSubnets.size(); i++) {
-            if (usedSubnets[i] == subnet) {
-                usedSubnets.erase(i);
-                break;
-            }
+    std::string subnet = swarmNetworks[index]["subnet"];
+    swarmNetworks.erase(index);
+    
+    // Remove subnet from used list
+    auto& usedSubnets = networksConfig["usedSubnets"];
+    for (size_t i = 0; i < usedSubnets.size(); i++) {
+        if (usedSubnets[i] == subnet) {
+            usedSubnets.erase(i);
+            break;
         }
-        
-        networksConfig["userNetworks"].erase(username);
-        saveNetworksConfig();
     }
     
+    saveNetworksConfig();
     return true;
 }
 
-bool NetworkManager::deleteSwarmNetwork(const std::string& clusterName) {
-    if (!conn) return false;
-    
-    std::string networkName = "swarm_" + clusterName;
-    virNetworkPtr network = virNetworkLookupByName(conn, networkName.c_str());
-    
-    if (!network) return false;
-    
-    if (virNetworkIsActive(network)) {
-        virNetworkDestroy(network);
-    }
-    
-    virNetworkUndefine(network);
-    virNetworkFree(network);
-    
-    if (networksConfig["swarmNetworks"].contains(clusterName)) {
-        std::string subnet = networksConfig["swarmNetworks"][clusterName]["subnet"];
-        
-        auto& usedSubnets = networksConfig["usedSubnets"];
-        for (size_t i = 0; i < usedSubnets.size(); i++) {
-            if (usedSubnets[i] == subnet) {
-                usedSubnets.erase(i);
-                break;
-            }
-        }
-        
-        networksConfig["swarmNetworks"].erase(clusterName);
-        saveNetworksConfig();
-    }
-    
-    return true;
-}
 
 json NetworkManager::listAllNetworks() {
     json result;
     result["success"] = true;
-    result["userNetworks"] = networksConfig["userNetworks"];
-    result["swarmNetworks"] = networksConfig["swarmNetworks"];
+    result["userNetworks"] = json::object();
+    result["swarmNetworks"] = json::object();
+    
+    // Group user networks by owner
+    for (const auto& network : networksConfig["userNetworks"]) {
+        std::string owner = network["owner"];
+        if (!result["userNetworks"].contains(owner)) {
+            result["userNetworks"][owner] = json::array();
+        }
+        result["userNetworks"][owner].push_back(network);
+    }
+    
+    // Group swarm networks by cluster
+    for (const auto& network : networksConfig["swarmNetworks"]) {
+        std::string clusterId = network.value("networkId", "unknown");
+        result["swarmNetworks"][clusterId] = network;
+    }
     
     return result;
 }
@@ -380,16 +661,21 @@ json NetworkManager::listUserNetworks(const std::string& username) {
     result["success"] = true;
     result["networks"] = json::array();
     
-    if (networksConfig["userNetworks"].contains(username)) {
-        result["networks"].push_back(networksConfig["userNetworks"][username]);
+    // List user's own networks
+    for (const auto& network : networksConfig["userNetworks"]) {
+        if (network["owner"] == username) {
+            result["networks"].push_back(network);
+        }
     }
     
     // Also list swarm networks owned by this user
-    for (auto& [clusterName, networkInfo] : networksConfig["swarmNetworks"].items()) {
-        if (networkInfo["owner"] == username) {
-            result["networks"].push_back(networkInfo);
+    for (const auto& network : networksConfig["swarmNetworks"]) {
+        if (network["owner"] == username) {
+            result["networks"].push_back(network);
         }
     }
+    
+    result["count"] = result["networks"].size();
     
     return result;
 }
@@ -406,34 +692,106 @@ bool NetworkManager::isNetworkActive(const std::string& networkName) {
     return active == 1;
 }
 
-json NetworkManager::getNetworkInfo(const std::string& networkName) {
+json NetworkManager::getNetworkInfo(const std::string& networkId) {
     json result;
     result["success"] = false;
     
-    if (!conn) {
-        result["error"] = "Not connected to libvirt";
-        return result;
+    // Search in user networks
+    for (const auto& network : networksConfig["userNetworks"]) {
+        if (network["networkId"] == networkId) {
+            result["success"] = true;
+            result["network"] = network;
+            
+            if (conn) {
+                std::string netName = network["networkName"];
+                virNetworkPtr net = virNetworkLookupByName(conn, netName.c_str());
+                if (net) {
+                    result["network"]["active"] = (virNetworkIsActive(net) == 1);
+                    
+                    char* bridgeName = virNetworkGetBridgeName(net);
+                    if (bridgeName) {
+                        result["network"]["bridge"] = bridgeName;
+                        free(bridgeName);
+                    }
+                    
+                    virNetworkFree(net);
+                }
+            }
+            
+            return result;
+        }
     }
     
-    virNetworkPtr network = virNetworkLookupByName(conn, networkName.c_str());
-    if (!network) {
-        result["error"] = "Network not found";
-        return result;
+    // Search in swarm networks
+    for (const auto& network : networksConfig["swarmNetworks"]) {
+        if (network["networkId"] == networkId) {
+            result["success"] = true;
+            result["network"] = network;
+            
+            if (conn) {
+                std::string netName = network["networkName"];
+                virNetworkPtr net = virNetworkLookupByName(conn, netName.c_str());
+                if (net) {
+                    result["network"]["active"] = (virNetworkIsActive(net) == 1);
+                    
+                    char* bridgeName = virNetworkGetBridgeName(net);
+                    if (bridgeName) {
+                        result["network"]["bridge"] = bridgeName;
+                        free(bridgeName);
+                    }
+                    
+                    virNetworkFree(net);
+                }
+            }
+            
+            return result;
+        }
     }
     
-    char* bridgeName = virNetworkGetBridgeName(network);
-    int active = virNetworkIsActive(network);
-    int autostart = 0;
-    virNetworkGetAutostart(network, &autostart);
-    
-    result["success"] = true;
-    result["name"] = networkName;
-    result["bridge"] = bridgeName ? bridgeName : "";
-    result["active"] = (active == 1);
-    result["autostart"] = (autostart == 1);
-    
-    if (bridgeName) free(bridgeName);
-    virNetworkFree(network);
-    
+    result["error"] = "Network not found";
     return result;
+}
+
+std::string NetworkManager::getNetworkIdByName(const std::string& networkName) {
+    // Search in user networks
+    for (const auto& network : networksConfig["userNetworks"]) {
+        if (network["networkName"] == networkName) {
+            return network["networkId"];
+        }
+    }
+    
+    // Search in swarm networks
+    for (const auto& network : networksConfig["swarmNetworks"]) {
+        if (network["networkName"] == networkName) {
+            return network["networkId"];
+        }
+    }
+    
+    return "";
+}
+
+bool NetworkManager::updateNetwork(const std::string& networkId, const json& updates) {
+    // Find and update in user networks
+    for (auto& network : networksConfig["userNetworks"]) {
+        if (network["networkId"] == networkId) {
+            if (updates.contains("displayName")) {
+                network["displayName"] = sanitizeNetworkName(updates["displayName"]);
+            }
+            saveNetworksConfig();
+            return true;
+        }
+    }
+    
+    // Find and update in swarm networks
+    for (auto& network : networksConfig["swarmNetworks"]) {
+        if (network["networkId"] == networkId) {
+            if (updates.contains("displayName")) {
+                network["displayName"] = sanitizeNetworkName(updates["displayName"]);
+            }
+            saveNetworksConfig();
+            return true;
+        }
+    }
+    
+    return false;
 }

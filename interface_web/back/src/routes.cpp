@@ -13,19 +13,16 @@ using json = nlohmann::json;
 UserContext getUserContext(const httplib::Request& req, UserOperations* userOps) {
     UserContext ctx;
     
-    std::string authHeader = req.get_header_value("Authorization");
-    std::cerr << "Auth header: '" << authHeader << "'" << std::endl;
-    
+    std::string authHeader = req.get_header_value("Authorization");    
     if (authHeader.find("Bearer ") == 0) {
         std::string token = authHeader.substr(7);
-        std::cerr << "Token extracted: '" << token << "'" << std::endl;
         
         std::string username, role;
         if (userOps->validateToken(token, username, role)) {
-            std::cerr << "Token valid for user: " << username << ", role: " << role << std::endl;
             ctx.userId = username;
             ctx.role = role;
             ctx.isAdmin = (role == "admin");
+            ctx.is_auth = true;
             return ctx;
         } else {
             std::cerr << "Token validation failed" << std::endl;
@@ -34,7 +31,7 @@ UserContext getUserContext(const httplib::Request& req, UserOperations* userOps)
         std::cerr << "No Bearer token found" << std::endl;
     }
     
-    return ctx;
+    return ctx; // Returns with is_auth = false
 }
 
 // Check if user has access to VM
@@ -46,6 +43,9 @@ bool checkVMAccess(const std::string& vmName, const UserContext& userCtx) {
 }
     
 void APIRoutes::setup(httplib::Server& svr) {
+    // httplib::Logger& lg;
+
+    // fprintf(stderr, "%s", svr.set_logger(lg))
 
     svr.Get("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
         // Admin only
@@ -102,7 +102,7 @@ void APIRoutes::setup(httplib::Server& svr) {
         }
     });
 
-    svr.Get("/api/hosts/stats", [this](const httplib::Request& req, httplib::Response& res) {
+    svr.Get("/api/hosts/stats", [this](const httplib::Request& req __attribute__((unused)), httplib::Response& res) {
         json result = manager->getAllHostsStats();
         res.set_content(result.dump(), "application/json");
     });
@@ -227,7 +227,7 @@ void APIRoutes::setup(httplib::Server& svr) {
             this->handleGetUserUsage(req, res);
         });
 
-        // PaaS routes
+    // PaaS routes
     svr.Post("/api/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
         auto userCtx = getUserContext(req, userOps);
         json body = json::parse(req.body);
@@ -241,9 +241,25 @@ void APIRoutes::setup(httplib::Server& svr) {
         res.set_content(result.dump(), "application/json");
     });
 
-    svr.Get("/api/paas/apps", [this](const httplib::Request& req, httplib::Response& res) {
+    svr.Get("/api/paas/apps", [this](const httplib::Request& req __attribute__((unused)), httplib::Response& res) {
         json result = paasOps->listApplications();
         res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Post("/paas/select-host", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handlePaaSSelectHost(req, res);
+    });
+    
+    svr.Post("/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handlePaaSDeploy(req, res);
+    });
+    
+    svr.Get("/paas/apps/:name/details", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handlePaaSAppDetails(req, res);
+    });
+    
+    svr.Post("/paas/apps/:name/migrate", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handlePaaSMigrate(req, res);
     });
 
     svr.Delete("/api/paas/apps/:appId", [this](const httplib::Request& req, httplib::Response& res) {
@@ -252,6 +268,43 @@ void APIRoutes::setup(httplib::Server& svr) {
         
         bool success = paasOps->deleteApplication(appId);
         
+        json result = {{"success", success}};
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // Deploy OnlyOffice for user
+    svr.Post("/api/documents/deploy", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        json result = paasOps->deployOnlyOffice(userCtx.userId);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // Get OnlyOffice URL
+    svr.Get("/api/documents/url", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        json result = paasOps->getOnlyOfficeURL(userCtx.userId);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // Delete OnlyOffice instance
+    svr.Delete("/api/documents", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        bool success = paasOps->deleteOnlyOffice(userCtx.userId);
         json result = {{"success", success}};
         res.set_content(result.dump(), "application/json");
     });
@@ -267,12 +320,47 @@ void APIRoutes::setup(httplib::Server& svr) {
      });
 
     // Networks
+    svr.Get("/api/networks/mine", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        json result = networkMgr->getUserNetworks(userCtx.userId);
+        res.set_content(result.dump(), "application/json");
+    });
+
     svr.Get("/api/networks", [this](const httplib::Request& req, httplib::Response& res) { 
         this->handleListAllNetworks(req, res);
      });
     svr.Post("/api/networks/user", [this](const httplib::Request& req, httplib::Response& res) { 
         this->handleCreateNetwork(req, res);
      });
+
+    svr.Get("/api/networks", [this](const auto& req, auto& res) {
+        this->handleListAllNetworks(req, res);
+    });
+    
+    svr.Get("/api/networks/user", [this](const auto& req, auto& res) {
+        this->handleListUserNetworks(req, res);
+    });
+    
+    svr.Post("/api/networks/user", [this](const auto& req, auto& res) {
+        this->handleCreateNetwork(req, res);
+    });
+    
+    svr.Get(R"(/api/networks/([a-zA-Z0-9_-]+))", [this](const auto& req, auto& res) {
+        this->handleGetNetwork(req, res);
+    });
+    
+    svr.Patch(R"(/api/networks/([a-zA-Z0-9_-]+))", [this](const auto& req, auto& res) {
+        this->handleUpdateNetwork(req, res);
+    });
+    
+    svr.Delete(R"(/api/networks/user/([a-zA-Z0-9_-]+))", [this](const auto& req, auto& res) {
+        this->handleDeleteNetwork(req, res);
+    });
 
     // Swarm clusters
     svr.Post("/api/swarm/clusters", [this](const httplib::Request& req, httplib::Response& res) { 
@@ -292,6 +380,89 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Put("/api/hosts/strategy", [this](const httplib::Request& req, httplib::Response& res) { 
         this->handleSetHostSelectionStrategy(req, res);
      });
+
+      // Database provisioning
+    svr.Post("/api/paas/database", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleProvisionDatabase(req, res);
+    });
+    
+    // SaaS billing
+    svr.Get("/api/saas/billing", [this](const httplib::Request& req, httplib::Response& res) {
+        this->handleGetSaaSBilling(req, res);
+    });
+
+
+    // PaaS monitoring endpoints
+    svr.Get("/api/paas/database/credentials", 
+        [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleGetDatabaseCredentials(req, res);
+        });
+
+    svr.Get(R"(/api/paas/apps/([^/]+)/logs)", 
+        [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleGetAppLogs(req, res);
+        });
+
+    svr.Get(R"(/api/paas/apps/([^/]+)/stats)", 
+        [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleGetAppStats(req, res);
+        });
+
+    svr.Post(R"(/api/paas/apps/([^/]+)/stop)", 
+        [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleStopApp(req, res);
+        });
+
+    svr.Post(R"(/api/paas/apps/([^/]+)/start)", 
+        [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleStartApp(req, res);
+        });
+
+    svr.Post("/api/paas/database", 
+        [this](const httplib::Request& req, httplib::Response& res) {
+            this->handleProvisionDatabase(req, res);
+        });
+
+    svr.Post("/api/paas/select-host", [this](auto& req, auto& res) {
+        handlePaaSSelectHost(req, res);
+    });
+
+    svr.Post("/api/paas/deploy", [this](auto& req, auto& res) {
+        handlePaaSDeploy(req, res);
+    });
+
+    svr.Get("/api/paas/applications", [this](auto& req, auto& res) {
+        handleListPaaSApplications(req, res);
+    });
+
+    svr.Get(R"(/api/paas/applications/([^/]+)/status)", [this](auto& req, auto& res) {
+        handlePaaSAppDetails(req, res);
+    });
+
+    svr.Delete(R"(/api/paas/applications/([^/]+))", [this](auto& req, auto& res) {
+        handleDeletePaaSApp(req, res);
+    });
+
+    svr.Post(R"(/api/paas/applications/([^/]+)/migrate)", [this](auto& req, auto& res) {
+        handlePaaSMigrate(req, res);
+    });
+
+    svr.Get("/api/paas/server-info", [this](auto& req, auto& res) {
+        handlePaaSServerInfo(req, res);
+    });
+
+    // Host routes (for multi-host features)
+    svr.Get("/api/hosts", [this](auto& req, auto& res) {
+        handleGetAvailableHosts(req, res);
+    });
+
+    svr.Get(R"(/api/hosts/([^/]+))", [this](auto& req, auto& res) {
+        handleGetHostDetails(req, res);
+    });
+
+    svr.Get("/api/hosts/available", [this](auto& req, auto& res) {
+        handleGetHostsAvailableForMigration(req, res);
+    });
 }
 
 void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {

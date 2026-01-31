@@ -1,12 +1,10 @@
 #include <iostream>
 #include "../include/httplib.h"
-#include "../include/libvirt_manager.hpp"
 #include "../include/vm_operations.hpp"
 #include "../include/host_manager.hpp"
 #include "../include/routes.hpp"
 #include "../include/cors.hpp"
 #include "../include/utils.hpp"
-#include "../include/definitions.hpp"
 #include "../include/config_manager.hpp"
 #include "../include/host_manager.hpp"
 #include "../include/resource_logger.hpp"
@@ -18,9 +16,8 @@
 
 using namespace httplib;
 
-int main() {
 
-    FlavorManager flavorMgr;
+int main() {
     ConfigManager config;
     ResourceLogger logger;
     logger.logSystemEvent(LogLevel::INFO, "Starting THOTH CLOUD server");
@@ -31,7 +28,7 @@ int main() {
     // Load hosts from config
     auto hosts = config.getList("HOSTS");
     if (hosts.empty()) {
-        logger.logSystemEvent(LogLevel::ERROR, "Empty Host list File: ");
+        logger.logSystemEvent(LogLevel::ERROR, "Empty Host list File");
     }
     
     for (const auto& host : hosts) {
@@ -48,22 +45,25 @@ int main() {
         return 1;
     }
     
-    // Initialize operations
+    // Get primary connection
     std::string primaryHostId = hostList["hosts"][0]["id"];
     virConnectPtr primaryConn = hostManager.getConnection(primaryHostId);
     
-    VMOperations vmOps(primaryConn, &hostManager);
+    // Initialize in correct order (NetworkManager before VMOperations)
     NetworkManager networkMgr(primaryConn);
     RemoteExec::RemoteExecutor remoteExec(primaryConn);
+    
+    // Now initialize components that depend on networkMgr
+    UserOperations userOps(primaryConn, &networkMgr);
+    VMOperations vmOps(primaryConn, &hostManager, &networkMgr);
     BaseImageManager imageMgr(&remoteExec);
-    FlavorManager flvMgr;
-    UserOperations userOps(primaryConn);
-    PaaSOperations paasOps(primaryConn);
-    SwarmOperations swarmOps(primaryConn, &vmOps, &networkMgr);
+    FlavorManager flavorMgr;  
+    PaaSOperations paasOps(primaryConn, &remoteExec, &hostManager);
+    SwarmOperations swarmOps(primaryConn, &vmOps, &networkMgr, &remoteExec, &hostManager);
 
-    // Initialize routes with all dependencies
+    // Initialize routes
     APIRoutes apiRoutes(&vmOps, &hostManager, &userOps, &paasOps, 
-        &swarmOps, &logger, &flvMgr, &networkMgr, &imageMgr);
+                       &swarmOps, &logger, &flavorMgr, &networkMgr, &imageMgr);
     
     // Create server
     Server svr;
@@ -73,7 +73,8 @@ int main() {
     int port = config.getInt("API_PORT", 3000);
     
     std::cout << "Server started on http://localhost:" << port << std::endl;
-    logger.logSystemEvent(LogLevel::INFO, "Server listening on port " + std::to_string(port));
+    logger.logSystemEvent(LogLevel::INFO, "Server listening on port " + 
+                         std::to_string(port));
     
     svr.listen("0.0.0.0", port);
     

@@ -1,4 +1,5 @@
 #include "../include/user_operations.hpp"
+#include "../include/network_manager.hpp"
 #include "../include/utils.hpp"
 #include <openssl/sha.h>
 #include <iomanip>
@@ -8,9 +9,51 @@
 #include <iostream>
 #include <sys/stat.h>
 
-UserOperations::UserOperations(virConnectPtr connection) 
-    : conn(connection), usersFile("/var/lib/thoth-cloud/users.json") {
+UserOperations::UserOperations(virConnectPtr connection, NetworkManager* netWMgr) 
+    : conn(connection), networkManager(netWMgr), usersFile("/var/lib/thoth-cloud/users.json") {
     loadUsers();
+    loadSessions(); // Load persisted sessions
+}
+
+
+void UserOperations::loadSessions() {
+    std::ifstream file(sessionsFile);
+    if (file.is_open()) {
+        json sessionsJson;
+        file >> sessionsJson;
+        file.close();
+        
+        for (auto& [token, session] : sessionsJson.items()) {
+            UserSession userSession;
+            userSession.username = session["username"];
+            userSession.role = session["role"];
+            userSession.expiry = session["expiry"];
+            
+            // Check if token is still valid (not expired)
+            if (userSession.expiry > std::time(nullptr)) {
+                sessions[token] = userSession;
+            }
+        }
+    }
+}
+
+
+bool UserOperations::saveSessions() {
+    json sessionsJson;
+    for (const auto& [token, session] : sessions) {
+        sessionsJson[token] = {
+            {"username", session.username},
+            {"role", session.role},
+            {"expiry", session.expiry}
+        };
+    }
+    
+    std::ofstream file(sessionsFile);
+    if (!file.is_open()) return false;
+    
+    file << sessionsJson.dump(2);
+    file.close();
+    return true;
 }
 
 void UserOperations::loadUsers() {
@@ -173,7 +216,6 @@ json UserOperations::createUser(const json& userData) {
     // Hash password
     std::string passwordHash = hashPassword(userData["password"].get<std::string>());
     
-    //TODO: Remove quota mgnt from users logic
     json newUser = {
         {"id", users.size() + 1},
         {"username", username},
@@ -193,8 +235,16 @@ json UserOperations::createUser(const json& userData) {
     };
     
     users.push_back(newUser);
-    
+
     if (saveUsers()) {
+        // CREATE DEFAULT NETWORK FOR USER
+        if (networkManager) {
+            json networkResult = networkManager->createUserNetwork(username, "default");
+            if (networkResult["success"].get<bool>()) {
+                newUser["defaultNetwork"] = networkResult["network"]["networkId"];
+            }
+        }
+    
         result["success"] = true;
         result["user"] = newUser;
         result["user"].erase("passwordHash"); // Don't send hash
