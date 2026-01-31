@@ -8,9 +8,9 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
-    z-index: 2000;
+    z-index: 9999;
     display: none;
     align-items: center;
     justify-content: center;
@@ -18,7 +18,7 @@
 }
 
 .modal-overlay.active {
-    display: flex;
+    display: flex !important;
 }
 
 @keyframes fadeIn {
@@ -41,6 +41,8 @@
     display: flex;
     flex-direction: column;
     animation: slideUp 0.3s ease;
+    position: relative;
+    z-index: 10000;
 }
 
 @keyframes slideUp {
@@ -103,7 +105,7 @@
     border-top: 1px solid var(--border);
     display: flex;
     justify-content: flex-end;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-md);
 }
 
 /* Delete VM Modal Specific */
@@ -385,6 +387,73 @@
     gap: var(--spacing-md);
 }
 
+/* App Catalog Modal - FIXED */
+.app-catalog-modal .modal {
+    max-width: 1200px;
+}
+
+.app-catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--spacing-lg);
+    margin-top: var(--spacing-lg);
+}
+
+.app-catalog-item {
+    background: var(--bg-card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-base);
+}
+
+.app-catalog-item:hover {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.app-catalog-item .app-icon {
+    font-size: 48px;
+    margin-bottom: var(--spacing-md);
+    display: block;
+}
+
+.app-catalog-item h4 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.app-catalog-item p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+    line-height: 1.5;
+}
+
+.app-category-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: var(--spacing-sm);
+}
+
+.app-catalog-item .app-price {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--primary);
+    margin-top: var(--spacing-sm);
+}
+
 /* Responsive Modals */
 @media (max-width: 768px) {
     .modal {
@@ -403,6 +472,10 @@
     }
     
     .swarm-node-config {
+        grid-template-columns: 1fr;
+    }
+    
+    .app-catalog-grid {
         grid-template-columns: 1fr;
     }
 }

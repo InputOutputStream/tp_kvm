@@ -62,7 +62,12 @@ function loadViewData(viewName) {
             loadVMs();
             break;
         case 'paas':
-            refreshApps();
+            refreshApps();  // This should show deployed apps
+            break;
+        case 'paas-catalog':
+            if (window.renderCatalogApps) {
+                setTimeout(() => renderCatalogApps(), 100); // Small delay to ensure DOM is ready
+            }
             break;
         case 'users':
             loadUsersTable();
@@ -145,7 +150,7 @@ function showToast(message, type = 'info') {
     
     setTimeout(() => {
         toast.classList.remove('show');
-    }, 3000);
+    }, 6000);
 }
 
 // Handle Window Resize

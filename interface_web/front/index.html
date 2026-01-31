@@ -4,13 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>THOTH CLOUD</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="styles/main.css">
     <link rel="stylesheet" href="styles/sidebar.css">
     <link rel="stylesheet" href="styles/cards.css">
+    <link rel="stylesheet" href="styles/network.css">
     <link rel="stylesheet" href="styles/forms.css">
     <link rel="stylesheet" href="styles/modals.css">
     <link rel="stylesheet" href="styles/dark-theme.css" id="theme-style">
     <link rel="stylesheet" href="styles/auth.css">
+    <link rel="stylesheet" href="styles/paas-apps.css">
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     
     <script src="scripts/auth-check.js"></script>
@@ -42,6 +46,12 @@
                     <span class="nav-text">Virtual Machines</span>
                     <span class="nav-badge" id="vm-count-badge">0</span>
                 </a>
+
+                <a href="#" class="nav-item" data-view="networks">
+                    <span class="nav-icon">🌐</span>
+                    <span class="nav-text">Networks</span>
+                </a>
+
                 <a href="#" class="nav-item" data-view="deploy">
                     <span class="nav-icon">🚀</span>
                     <span class="nav-text">Deploy VM</span>
@@ -73,6 +83,10 @@
                 <a href="#" class="nav-item" data-view="system">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-text">System Info</span>
+                </a>
+                <a href="#" class="nav-item" data-view="hosts" data-admin-only>
+                    <span class="nav-icon">🖥️</span>
+                    <span class="nav-text">Hosts</span>
                 </a>
             </div>
 
@@ -327,8 +341,7 @@
                 <div class="info-banner">
                     <span class="info-icon">ℹ️</span>
                     <div>
-                        <h4>Automated Deployment with Cloud-Init</h4>
-                        <p>Ubuntu 22.04 Cloud Image • Automatic configuration • QEMU Guest Agent • Ready in 1-2 minutes</p>
+                        <p>THoTH Cloud • Automatic configuration • Ready in 1-2 minutes</p>
                     </div>
                 </div>
 
@@ -405,6 +418,11 @@
                                 <span>Username:</span>
                                 <strong id="result-username"></strong>
                             </div>
+                            
+                            <div id="vm-info-panel" class="vm-info-panel" style="display: none;">
+                                <!-- Populated by deploy.js -->
+                            </div>
+                            
                             <div class="ssh-command">
                                 <p>SSH Connection:</p>
                                 <code id="ssh-command"></code>
@@ -420,35 +438,149 @@
         </div>
 
         <!-- PaaS Applications View -->
+         
         <div id="view-paas" class="view">
-            <div class="page-header">
-                <div class="page-title">
-                    <h2>PaaS Application Catalog</h2>
-                    <p class="page-subtitle">Deploy applications with one click</p>
+            <div class="view-header">
+                <div>
+                    <h2>📦 PaaS Applications</h2>
+                    <p>Manage your deployed applications</p>
                 </div>
-                <div class="page-actions">
+                <div class="header-actions">
                     <button class="btn btn-secondary" onclick="refreshApps()">
-                        <span>🔄</span>
-                        Refresh
+                        🔄 Refresh
+                    </button>
+                    <button class="btn btn-primary" onclick="switchView('paas-catalog')">
+                        ➕ Deploy New App
                     </button>
                 </div>
             </div>
 
-            <!-- Filters -->
-            <div class="filters-bar">
-                <input type="text" class="search-input" placeholder="🔍 Search applications..." id="app-search">
+            <!-- PaaS Catalog View -->
+            <div id="view-paas-catalog" class="view">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2>📦 Application Catalog</h2>
+                        <p class="page-subtitle">Deploy pre-configured applications</p>
+                    </div>
+                    <div class="page-actions">
+                        <button class="btn btn-secondary" onclick="switchView('paas')">
+                            ← Back to My Apps
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="paas-catalog-grid" class="apps-grid">
+                    <!-- Apps rendered by paas-catalog-view.js -->
+                </div>
+            </div>
+            
+            <div class="stats-grid" style="margin-bottom: 20px;">
+                <div class="stat-card">
+                    <div class="stat-icon">📦</div>
+                    <div class="stat-details">
+                        <h3 id="paas-count-badge">0</h3>
+                        <p>Total Applications</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">🟢</div>
+                    <div class="stat-details">
+                        <h3 id="paas-running-count">0</h3>
+                        <p>Running</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">💾</div>
+                    <div class="stat-details">
+                        <h3 id="paas-storage">0 GB</h3>
+                        <p>Storage Used</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="search-filter-bar">
+                <input type="text" id="app-search" placeholder="🔍 Search applications..." class="search-input">
+                
                 <div class="filter-chips">
-                    <button class="chip active" data-category="all">All</button>
-                    <button class="chip" data-category="web">🌐 Web</button>
-                    <button class="chip" data-category="database">🗄️ Database</button>
-                    <button class="chip" data-category="monitoring">📊 Monitoring</button>
-                    <button class="chip" data-category="development">💻 Development</button>
-                    <button class="chip" data-category="collaboration">🤝 Collaboration</button>
+                    <span class="chip active" data-filter="all">All</span>
+                    <span class="chip" data-filter="running">Running</span>
+                    <span class="chip" data-filter="stopped">Stopped</span>
                 </div>
             </div>
 
-            <div id="apps-grid" class="apps-grid">
-                <!-- Apps will be loaded dynamically -->
+            <!-- Add this section after the existing PaaS view -->
+            <div id="view-paas-deploy" class="view">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2>🚀 Deploy New Application</h2>
+                        <p class="page-subtitle">Deploy applications with host selection</p>
+                    </div>
+                    <div class="page-actions">
+                        <button class="btn btn-secondary" onclick="switchView('paas-catalog')">
+                            ← Back to Catalog
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="deployment-wizard">
+                    <div class="wizard-steps">
+                        <div class="step active" data-step="1">1. Select App</div>
+                        <div class="step" data-step="2">2. Configure</div>
+                        <div class="step" data-step="3">3. Select Host</div>
+                        <div class="step" data-step="4">4. Deploy</div>
+                    </div>
+                    
+                    <div id="paas-deploy-form" class="form-container">
+                        <!-- Will be populated by paas-catalog-view.js -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add host selection strategy section -->
+            <div id="host-strategy-modal" class="modal-overlay">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>⚙️ Host Selection Strategy</h3>
+                        <button class="modal-close" onclick="closeModal('host-strategy-modal')">✖</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="strategy-options">
+                            <label class="strategy-option">
+                                <input type="radio" name="host-strategy" value="0" checked>
+                                <div class="strategy-content">
+                                    <h4>🔄 Least Used</h4>
+                                    <p>Select host with most free resources</p>
+                                </div>
+                            </label>
+                            <label class="strategy-option">
+                                <input type="radio" name="host-strategy" value="1">
+                                <div class="strategy-content">
+                                    <h4>🔄 Round Robin</h4>
+                                    <p>Rotate between available hosts</p>
+                                </div>
+                            </label>
+                            <label class="strategy-option">
+                                <input type="radio" name="host-strategy" value="2">
+                                <div class="strategy-content">
+                                    <h4>🎯 Best Fit</h4>
+                                    <p>Select host that best matches requirements</p>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" onclick="updateHostStrategy()">
+                            Update Strategy
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Applications Grid -->
+            <div id="paas-apps-grid" class="apps-grid">
+                <p class="loading-text">Loading applications...</p>
             </div>
         </div>
 
@@ -518,7 +650,7 @@
             </div>
         </div>
 
-        <!-- Users & Quotas View -->
+        <!-- Users View -->
         <div id="view-users" class="view">
             <div class="page-header">
                 <div class="page-title">
@@ -534,28 +666,6 @@
             </div>
 
             <div class="users-layout">
-                <div class="quotas-summary">
-                    <h3>Global Quotas</h3>
-                    <div class="quota-items">
-                        <div class="quota-item">
-                            <span>Total CPU:</span>
-                            <strong>32 vCPUs</strong>
-                        </div>
-                        <div class="quota-item">
-                            <span>Total RAM:</span>
-                            <strong>64 GB</strong>
-                        </div>
-                        <div class="quota-item">
-                            <span>Storage:</span>
-                            <strong>1 TB</strong>
-                        </div>
-                        <div class="quota-item">
-                            <span>Max VMs:</span>
-                            <strong>20</strong>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="users-table-container">
                     <h3>Active Users</h3>
                     <table class="data-table">
@@ -574,6 +684,58 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+
+        <!-- Networks View -->
+        <div id="view-networks" class="view">
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>🌐 Network Management</h2>
+                    <p class="page-subtitle">Manage virtual networks and isolation</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="createUserNetwork()">
+                        <span>➕</span>
+                        Create User Network
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadNetworks()">
+                        <span>🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            
+            <div id="networks-list" class="networks-container">
+                <p class="loading-text">Loading networks...</p>
+            </div>
+        </div>
+
+        <!-- Hosts Management View (Admin Only) -->
+        <div id="view-hosts" class="view" data-admin-only>
+            <div class="page-header">
+                <div class="page-title">
+                    <h2>🖥️ Host Management</h2>
+                    <p class="page-subtitle">Manage compute hosts and resources</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-primary" onclick="showAddHostModal()">
+                        <span>➕</span>
+                        Add Host
+                    </button>
+                    <button class="btn btn-secondary" onclick="showHostStrategyModal()">
+                        <span>⚙️</span>
+                        Selection Strategy
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadHostsManagement()">
+                        <span>🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            
+            <div id="hosts-list" class="hosts-grid">
+                <p class="loading-text">Loading hosts...</p>
             </div>
         </div>
 
@@ -758,12 +920,27 @@
     <!-- Toast Notifications -->
     <div id="toast" class="toast"></div>
     <script src="scripts/auth.js"></script>
+
     <script src="scripts/theme.js"></script>
+
+    <script src="scripts/networks.js"></script>
     <script src="scripts/vms.js"></script>  
+
     <script src="scripts/navigation.js"></script>
+
+    <script src="scripts/hosts.js"></script>
+    <script src="scripts/swarm.js"></script>
+
     <script src="scripts/deploy.js"></script>
-    <script src="scripts/modals.js"></script>
-    <script src="scripts/profil.js"></script>
+    
+    <script src="scripts/modals.js"></script> 
+    <script src="scripts/profil.js"></script>  
+    <script src="scripts/paas-apps.js"></script>
+    <script src="scripts/paas-catalog.js"></script> 
+    <script src="scripts/paas-catalog-view.js"></script> 
+    <script src="scripts/users.js"></script>
+    <script src="scripts/swarm-services.js"></script>
+
 
     <script src="scripts/main.js" type="module"></script>
 

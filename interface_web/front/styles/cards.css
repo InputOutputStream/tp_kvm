@@ -474,3 +474,371 @@
         width: 100%;
     }
 }
+
+/* ==========================================
+   NETWORK CARDS
+   ========================================== */
+
+.networks-container {
+    padding: 20px 0;
+}
+
+.network-section {
+    margin-bottom: 40px;
+}
+
+.network-section h3 {
+    margin-bottom: 20px;
+    color: var(--text-primary);
+}
+
+.network-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+}
+
+.network-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.network-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.network-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.network-card-header h4 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.network-type-badge {
+    padding: 4px 12px;
+    background: rgba(0, 132, 61, 0.1);
+    border-radius: 12px;
+    font-size: 0.85em;
+    color: var(--primary-color);
+}
+
+.network-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.network-info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9em;
+}
+
+.network-info-item code {
+    padding: 2px 8px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+}
+
+/* ==========================================
+   HOST CARDS
+   ========================================== */
+
+.hosts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+    gap: 20px;
+    padding: 20px 0;
+}
+
+.host-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.host-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.host-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.host-card-header h3 {
+    margin: 0 0 5px 0;
+    color: var(--text-primary);
+}
+
+.host-uri {
+    font-size: 0.85em;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+}
+
+.host-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.host-stat {
+    background: rgba(0, 0, 0, 0.02);
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.stat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.progress-bar {
+    height: 8px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 5px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--success-color));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.host-stat small {
+    font-size: 0.8em;
+    color: var(--text-secondary);
+}
+
+.host-vm-count {
+    margin: 5px 0 0 0;
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+.host-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* ==========================================
+   CLUSTER CARDS
+   ========================================== */
+
+.cluster-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.cluster-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.cluster-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cluster-body {
+    margin-bottom: 20px;
+}
+
+.cluster-info {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.info-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9em;
+}
+
+.info-icon {
+    font-size: 1.2em;
+}
+
+.cluster-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* ==========================================
+   NODE ITEMS
+   ========================================== */
+
+.nodes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.node-item {
+    background: rgba(0, 0, 0, 0.02);
+    padding: 15px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.node-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.node-role-badge {
+    padding: 3px 10px;
+    background: rgba(0, 132, 61, 0.1);
+    border-radius: 12px;
+    font-size: 0.8em;
+    color: var(--primary-color);
+}
+
+.node-details {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    font-size: 0.85em;
+}
+
+/* ==========================================
+   INSTRUCTIONS DISPLAY
+   ========================================== */
+
+.instructions-text {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 20px;
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    line-height: 1.6;
+    overflow-x: auto;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* ==========================================
+   CLUSTER DETAILS GRID
+   ========================================== */
+
+.cluster-details-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.detail-item strong {
+    font-size: 0.85em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.detail-item code {
+    padding: 5px 10px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+}
+
+/* ==========================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================== */
+
+@media (max-width: 768px) {
+    .hosts-grid,
+    .network-cards {
+        grid-template-columns: 1fr;
+    }
+    
+    .host-stats-grid,
+    .cluster-info,
+    .cluster-details-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================
+   MODAL IMPROVEMENTS
+   ========================================== */
+
+.modal-large {
+    max-width: 800px;
+}
+
+.modal-medium {
+    max-width: 600px;
+}
+
+/* Scrollable modal body */
+.modal-body {
+    max-height: calc(90vh - 150px);
+    overflow-y: auto;
+}
+
+/* Form row layout */
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+}
+
+@media (max-width: 768px) {
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+}

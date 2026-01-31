@@ -27,14 +27,6 @@ function showConsoleModal() {
                 <div class="console-details" id="console-details">
                     <p class="loading-text">Loading console information...</p>
                 </div>
-                <div class="console-instructions" style="margin-top: 20px;">
-                    <h4>Connection Instructions:</h4>
-                    <ol>
-                        <li>Install a VNC client (e.g., TigerVNC, RealVNC, or Remmina)</li>
-                        <li>Use the connection details shown above</li>
-                        <li>Connect to access the VM console</li>
-                    </ol>
-                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeConsoleModal()">Close</button>
@@ -46,6 +38,29 @@ function showConsoleModal() {
     
     // Load VNC info
     loadConsoleInfo();
+}
+
+async function openVNCConsole(vmName) {
+    const response = await fetch(`/api/vms/${vmName}/vnc`, {
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+    
+    const vncInfo = await response.json();
+    
+    if (!vncInfo.success) {
+        alert(`Error: ${vncInfo.error}`);
+        return;
+    }
+    
+    // Open noVNC in new window or iframe
+    const vncUrl = `http://${vncInfo.vnc.host}:6080/vnc.html?` +
+                   `host=${vncInfo.vnc.host}&` +
+                   `port=${vncInfo.vnc.port}&` +
+                   `autoconnect=true`;
+    
+    window.open(vncUrl, 'vnc_' + vmName, 'width=1024,height=768');
 }
 
 function closeConsoleModal() {

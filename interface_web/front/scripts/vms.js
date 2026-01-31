@@ -71,6 +71,7 @@ function createVMCard(vm) {
                 <div class="vm-stat-item">
                     <strong>Memory:</strong> ${vm.stats.memory.percent}%
                 </div>
+                <div id="vm-info-panel" class="vm-info-panel" style="display: none;"></div>
             </div>
         `;
     }

@@ -1,4 +1,4 @@
-import APPS_CATALOG from "./paas-catalog.js";
+let APPS_CATALOG = window.PAAS_APPS_EXTENDED
 
 const style = document.createElement('style');
 style.textContent = `
@@ -20,6 +20,37 @@ let charts = {};
 let monitoringInterval = null;
 
 // ==========================================
+// ROLE-BASED UI VISIBILITY
+// ==========================================
+
+function initializeRoleBasedUI() {
+    const user = authService.currentUser;
+    if (!user) return;
+    
+    const isAdmin = user.role === 'admin';
+    
+    // Hide admin-only sections for regular users
+    const adminSections = document.querySelectorAll('[data-admin-only]');
+    adminSections.forEach(section => {
+        section.style.display = isAdmin ? '' : 'none';
+    });
+    
+    // Hide admin nav items
+    const adminNavItems = [
+        'users',
+        'monitoring',
+        'system'
+    ];
+    
+    adminNavItems.forEach(viewName => {
+        const navItem = document.querySelector(`[data-view="${viewName}"]`);
+        if (navItem && !isAdmin) {
+            navItem.style.display = 'none';
+        }
+    });
+}
+
+// ==========================================
 // PaaS Applications
 // ==========================================
 
@@ -39,6 +70,20 @@ async function refreshApps() {
     } catch (error) {
         console.log('Using catalog apps');
         renderApps(APPS_CATALOG);
+    }
+}
+
+function switchToPaasCatalog() {
+    // Hide all views
+    document.querySelectorAll('.view').forEach(view => {
+        view.classList.remove('active');
+    });
+    
+    // Show catalog view
+    const catalogView = document.getElementById('view-paas-catalog');
+    if (catalogView) {
+        catalogView.classList.add('active');
+        renderCatalogApps();
     }
 }
 
@@ -288,47 +333,47 @@ function showAddUserModal() {
     modal.id = 'add-user-modal';
     
     modal.innerHTML = `
-        <div class="modal">
+        <div class="modal" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
             <div class="modal-header">
-                <h3>Add New User</h3>
+                <h3>👤 Add New User</h3>
                 <button class="modal-close" onclick="closeAddUserModal()">✖</button>
             </div>
             <form onsubmit="createUser(event)">
-                <div class="modal-body">
+                <div class="modal-body" style="max-height: calc(90vh - 150px); overflow-y: auto;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>First Name *</label>
+                            <input type="text" id="new-firstName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name *</label>
+                            <input type="text" id="new-lastName" required>
+                        </div>
+                    </div>
+                    
                     <div class="form-group">
                         <label>Username *</label>
-                        <input type="text" id="new-username" required>
+                        <input type="text" id="new-username" required 
+                               pattern="[a-z][a-z0-9_]*" 
+                               title="Lowercase letters, numbers, underscore only">
                     </div>
+                    
                     <div class="form-group">
                         <label>Email *</label>
                         <input type="email" id="new-email" required>
                     </div>
+                    
                     <div class="form-group">
                         <label>Password *</label>
-                        <input type="password" id="new-password" required>
+                        <input type="password" id="new-password" required minlength="8">
                     </div>
+                    
                     <div class="form-group">
                         <label>Role *</label>
                         <select id="new-role" required>
                             <option value="user">User</option>
                             <option value="admin">Admin</option>
                         </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Max VMs</label>
-                        <input type="number" id="new-maxVMs" value="5">
-                    </div>
-                    <div class="form-group">
-                        <label>Max CPUs</label>
-                        <input type="number" id="new-maxCPU" value="8">
-                    </div>
-                    <div class="form-group">
-                        <label>Max RAM (GB)</label>
-                        <input type="number" id="new-maxRAM" value="16">
-                    </div>
-                    <div class="form-group">
-                        <label>Max Storage (GB)</label>
-                        <input type="number" id="new-maxStorage" value="100">
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -342,7 +387,6 @@ function showAddUserModal() {
     document.body.appendChild(modal);
 }
 
-
 async function createUser(event) {
     event.preventDefault();
     
@@ -350,11 +394,9 @@ async function createUser(event) {
         username: document.getElementById('new-username').value,
         email: document.getElementById('new-email').value,
         password: document.getElementById('new-password').value,
-        role: document.getElementById('new-role').value,
-        // maxVMs: parseInt(document.getElementById('new-maxVMs').value),
-        // maxCPU: parseInt(document.getElementById('new-maxCPU').value),
-        // maxRAM: parseInt(document.getElementById('new-maxRAM').value),
-        // maxStorage: parseInt(document.getElementById('new-maxStorage').value)
+        firstName: document.getElementById('new-firstName').value,
+        lastName: document.getElementById('new-lastName').value,
+        role: document.getElementById('new-role').value
     };
     
     try {
@@ -376,13 +418,13 @@ async function createUser(event) {
     }
 }
 
-function editUser(username) {
-    showToast(`Edit user ${username} - TO DO :(`, 'info');
-}
-
 function closeAddUserModal() {
     const modal = document.getElementById('add-user-modal');
     if (modal) modal.remove();
+}
+
+function editUser(username) {
+    showToast(`Edit user ${username} - TO DO :(`, 'info');
 }
 
 async function deleteUser(username) {
@@ -602,25 +644,12 @@ async function loadSystemInfo() {
 // Initialize Everything
 // ==========================================
 
-window.addEventListener('DOMContentLoaded', () => {
-    if (!window.authService?.isAuthenticated()) {
-        window.location.href = 'login.html';
-        return;
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.authService?.isAuthenticated()) {
+        initializeRoleBasedUI();
     }
-    
-    initCharts();
-    loadVMs();
-    refreshApps();
-    loadUsersTable();
-    updateBilling();
-    
-    setInterval(() => {
-        if (document.getElementById('view-vms')?.classList.contains('active') ||
-            document.getElementById('view-dashboard')?.classList.contains('active')) {
-            loadVMs();
-        }
-    }, 10000);
 });
+
 
 function debounce(func, wait) {
     let timeout;
@@ -637,6 +666,7 @@ function debounce(func, wait) {
 window.refreshApps = refreshApps;
 window.deployApp = deployApp;
 window.deleteApp = deleteApp;
+window.switchToPaasCatalog = switchToPaasCatalog;
 window.loadUsersTable = loadUsersTable;
 window.showAddUserModal = showAddUserModal;
 window.closeAddUserModal = closeAddUserModal;
@@ -648,3 +678,4 @@ window.generateInvoice = generateInvoice;
 window.initCharts = initCharts;
 window.toggleMonitoring = toggleMonitoring;
 window.loadSystemInfo = loadSystemInfo;
+window.initializeRoleBasedUI = initializeRoleBasedUI;
