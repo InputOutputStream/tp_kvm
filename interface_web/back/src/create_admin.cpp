@@ -12,15 +12,11 @@ int main() {
     
     json adminData = {
         {"username", "admin"},
-        {"password", "admin123"},  // Admin Password
-        {"email", "admin@thoth.local"},
-        {"firstName", "Admin"},
-        {"lastName", "User"},
-        {"role", "admin"},
-        {"maxVMs", 100},
-        {"maxCPU", 64},
-        {"maxRAM", 128},
-        {"maxStorage", 1000}
+        {"password", "Aadmin123"},  // Admin Password
+        {"email", "admin@admin.com"},
+        {"firstName", "admin"},
+        {"lastName", "admin"},
+        {"role", "admin"}
     };
     
     json result = userOps.createUser(adminData);

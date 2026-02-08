@@ -14,8 +14,6 @@
 #include <sstream>
 
 
-UserContext getUserContext(const httplib::Request& req, UserOperations* userOps);
-
 using json = nlohmann::json;
 
 
@@ -113,9 +111,83 @@ void APIRoutes::handleSetHostSelectionStrategy(const httplib::Request& req, http
     res.set_content(result.dump(), "application/json");
 }
 
+// ==========================================
+// AUTHENTICATION HANDLERS
+// ==========================================
+
+void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (const std::exception& e) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Invalid JSON"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    if (!body.contains("username") || !body.contains("password")) {
+        res.status = 400;
+        json error = {{"success", false}, {"error", "Username and password required"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
+    json result = userOps->authenticate(
+        body["username"].get<std::string>(),
+        body["password"].get<std::string>()
+    );
+
+    std::cerr << "Login result: " << result.dump() << std::endl;  
+    
+    if (!result["success"].get<bool>()) {
+        res.status = 401;
+    }
+    
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {
+    try {
+        auto body = json::parse(req.body);
+        
+        // Basic Validation
+        if (!body.contains("username") || !body.contains("password")) {
+            res.status = 400;
+            json result = {{"success", false}, {"error", "Missing username or password"}};
+            res.set_content(result.dump(), "application/json");
+            return;
+        }
+
+        std::string username = body["username"];
+        std::string password = body["password"];
+        std::string email = body.value("email", "");
+        std::string role = body.value("role", "user"); // Default to standard user
+        std::string firstName = body.value("firstName", "");
+        std::string lastName = body.value("lastName", "");
+        std::string networkName = body.value("networkName", "");
+
+        // Create User via UserOperations
+        if (userOps->createUser(body)) {
+            networkMgr->createUserNetwork(username, "net_" + username); 
+            
+            res.status = 201;
+            json result = {{"success", true}, {"message", "User registered successfully"}};
+            res.set_content(result.dump(), "application/json");
+        } else {
+            res.status = 409; // Conflict
+            json result = {{"success", false}, {"error", "User already exists or creation failed"}};
+            res.set_content(result.dump(), "application/json");
+        }
+    } catch (const std::exception& e) {
+        res.status = 400;
+        json result = {{"success", false}, {"error", "Invalid JSON format"}};
+        res.set_content(result.dump(), "application/json");
+    }
+}
 
 void APIRoutes::handleProvisionDatabase(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     json body;
     try {
@@ -207,7 +279,7 @@ void APIRoutes::handleProvisionDatabase(const httplib::Request& req, httplib::Re
 // ==========================================
 
 void APIRoutes::handleGetSaaSBilling(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!userCtx.isAdmin) {
         res.status = 403;
@@ -246,7 +318,7 @@ void APIRoutes::handleGetSaaSBilling(const httplib::Request& req, httplib::Respo
 
 // List all networks (admin view)
 void APIRoutes::handleListAllNetworks(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
     
     if (!ctx.is_auth) {
         res.status = 401;
@@ -260,7 +332,7 @@ void APIRoutes::handleListAllNetworks(const httplib::Request& req, httplib::Resp
 
 // List user's networks
 void APIRoutes::handleListUserNetworks(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
     
     if (!ctx.is_auth) {
         res.status = 401;
@@ -278,46 +350,9 @@ void APIRoutes::handleListUserNetworks(const httplib::Request& req, httplib::Res
     res.set_content(result.dump(), "application/json");
 }
 
-// Create user network
-void APIRoutes::handleCreateNetwork(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
-    
-    if (!ctx.is_auth) {
-        res.status = 401;
-        res.set_content("{\"error\": \"Unauthorized\"}", "application/json");
-        return;
-    }
-    
-    try {
-        auto body = json::parse(req.body);
-        std::string username = body["username"];
-        
-        // Verify user can only create for themselves (unless admin)
-        if (!ctx.isAdmin && username != ctx.userId) {
-            res.status = 403;
-            res.set_content("{\"error\": \"Forbidden\"}", "application/json");
-            return;
-        }
-        
-        std::string networkName = body.value("networkName", "");
-        auto result = networkMgr->createUserNetwork(username, networkName);
-        
-        if (!result["success"].get<bool>()) {
-            res.status = 400;
-        }
-        
-        res.set_content(result.dump(), "application/json");
-        
-    } catch (const std::exception& e) {
-        res.status = 400;
-        json error = {{"error", "Invalid request"}, {"details", e.what()}};
-        res.set_content(error.dump(), "application/json");
-    }
-}
-
 // Get specific network info
 void APIRoutes::handleGetNetwork(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
     
     if (!ctx.is_auth) {
         res.status = 401;
@@ -349,7 +384,7 @@ void APIRoutes::handleGetNetwork(const httplib::Request& req, httplib::Response&
 
 // Update network (rename)
 void APIRoutes::handleUpdateNetwork(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
     
     if (!ctx.is_auth) {
         res.status = 401;
@@ -385,48 +420,6 @@ void APIRoutes::handleUpdateNetwork(const httplib::Request& req, httplib::Respon
             {"success", success},
             {"message", success ? "Network updated" : "Update failed"}
         };
-        
-        res.set_content(result.dump(), "application/json");
-        
-    } catch (const std::exception& e) {
-        res.status = 400;
-        json error = {{"error", "Invalid request"}, {"details", e.what()}};
-        res.set_content(error.dump(), "application/json");
-    }
-}
-
-// Delete network
-void APIRoutes::handleDeleteNetwork(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
-    
-    if (!ctx.is_auth) {
-        res.status = 401;
-        res.set_content("{\"error\": \"Unauthorized\"}", "application/json");
-        return;
-    }
-    
-    try {
-        std::string networkId = req.matches[1];
-        auto body = json::parse(req.body);
-        std::string username = body["username"];
-        
-        // Verify user can only delete their own networks (unless admin)
-        if (!ctx.isAdmin && username != ctx.userId) {
-            res.status = 403;
-            res.set_content("{\"error\": \"Forbidden\"}", "application/json");
-            return;
-        }
-        
-        bool success = networkMgr->deleteUserNetwork(networkId, username);
-        
-        json result = {
-            {"success", success},
-            {"message", success ? "Network deleted" : "Delete failed"}
-        };
-        
-        if (!success) {
-            res.status = 400;
-        }
         
         res.set_content(result.dump(), "application/json");
         
@@ -561,7 +554,7 @@ void APIRoutes::handleStartApp(const httplib::Request& req, httplib::Response& r
 
 // POST /api/paas/select-host
 void APIRoutes::handlePaaSSelectHost(const httplib::Request& req, httplib::Response& res) {    
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -592,7 +585,7 @@ void APIRoutes::handlePaaSSelectHost(const httplib::Request& req, httplib::Respo
 
 // POST /api/paas/deploy
 void APIRoutes::handlePaaSDeploy(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -638,7 +631,7 @@ void APIRoutes::handlePaaSDeploy(const httplib::Request& req, httplib::Response&
 
 // GET /api/paas/applications (list all applications)
 void APIRoutes::handleListPaaSApplications(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -678,7 +671,7 @@ void APIRoutes::handleListPaaSApplications(const httplib::Request& req, httplib:
 
 // GET /api/paas/applications/{appId}/status
 void APIRoutes::handlePaaSAppDetails(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -720,7 +713,7 @@ void APIRoutes::handlePaaSAppDetails(const httplib::Request& req, httplib::Respo
 
 // DELETE /api/paas/applications/{appId}
 void APIRoutes::handleDeletePaaSApp(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -772,7 +765,7 @@ void APIRoutes::handleDeletePaaSApp(const httplib::Request& req, httplib::Respon
 // POST /api/paas/applications/{appName}/migrate
 // NOTE: Migration functionality not implemented in PaaSOperations 
 void APIRoutes::handlePaaSMigrate(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -829,7 +822,7 @@ void APIRoutes::handlePaaSMigrate(const httplib::Request& req, httplib::Response
 
 // GET /api/paas/server-info
 void APIRoutes::handlePaaSServerInfo(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -878,7 +871,7 @@ void APIRoutes::handlePaaSServerInfo(const httplib::Request& req, httplib::Respo
 
 // GET /api/hosts (for frontend to get available hosts)
 void APIRoutes::handleGetAvailableHosts(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -910,7 +903,7 @@ void APIRoutes::handleGetAvailableHosts(const httplib::Request& req, httplib::Re
 
 // GET /api/hosts/{hostId} (for frontend to get specific host info)
 void APIRoutes::handleGetHostDetails(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;
@@ -944,7 +937,7 @@ void APIRoutes::handleGetHostDetails(const httplib::Request& req, httplib::Respo
 
 // GET /api/hosts/available (for migration - get hosts with available resources)
 void APIRoutes::handleGetHostsAvailableForMigration(const httplib::Request& req, httplib::Response& res) {
-    UserContext ctx = getUserContext(req, userOps);
+    UserContext ctx = extractUserContext(req);
 
     if (!ctx.is_auth) {
         res.status = 401;

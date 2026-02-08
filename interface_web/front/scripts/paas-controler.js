@@ -263,6 +263,14 @@ class PaaSController {
                 </button>
             </div>
         `;
+
+        // Add price display
+        const price = window.PRICING?.PAAS[app.id?.toUpperCase()] || app.price;
+        card.innerHTML += `
+            <div class="catalog-price-badge">
+                ${price.toLocaleString()} FCFA/month
+            </div>
+        `;
         
         return card;
     }

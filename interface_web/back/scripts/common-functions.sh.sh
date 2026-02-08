@@ -212,6 +212,14 @@ EOF
     systemctl restart libvirtd
     
     log_success "Libvirt configured for remote access"
+
+# Allow forwarding
+sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" | tee -a /etc/sysctl.conf
+
+# Configure firewall to allow socat connections
+ufw allow 10000:60000/tcp comment "Port forwarding for VMs"
+
 }
 
 setup_default_network() {
@@ -284,6 +292,7 @@ create_user_if_not_exists() {
         log_success "User '$username' added to groups: $groups"
     fi
 }
+
 
 configure_passwordless_sudo() {
     local username=$1

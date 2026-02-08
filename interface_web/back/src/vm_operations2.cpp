@@ -4,6 +4,8 @@
 #include "../include/remote_executor.hpp"
 #include "../include/host_manager.hpp"
 #include "../include/baseimage_manager.hpp"
+#include "../include/isolation_utils.hpp"
+#include "../include/network_proxy_service.hpp"
 
 #include <regex>
 #include <fstream>
@@ -13,7 +15,197 @@
 #include <sys/stat.h>
 #include <libvirt/virterror.h>
 
-json VMOperations::getIP(const std::string& name) {
+
+// Initialize in VMOperations constructor
+
+VMOperations::VMOperations(virConnectPtr connection, HostManager *hostMgr, 
+    NetworkManager *netMgr, ResourceMetadataStore *g_metadataStore, NetworkProxyService *g_proxyService)
+ : conn(connection), hostManager(hostMgr), networkManager(netMgr), 
+ g_metadataStore(g_metadataStore), g_proxyService(g_proxyService) 
+ {
+    
+    // Initialize metadata store
+    if (!g_metadataStore) {
+        g_metadataStore = new ResourceMetadataStore();
+    }
+    
+    // Initialize proxy service
+    if (!g_proxyService && hostMgr) {
+        // Get libvirt host address
+        char* hostname = virConnectGetHostname(connection);
+        std::string hostAddr = hostname ? hostname : "localhost";
+        free(hostname);
+        
+        RemoteExec::RemoteExecutor* remoteExec = new RemoteExec::RemoteExecutor(connection);
+        g_proxyService = new NetworkProxyService(remoteExec, hostAddr);
+    }
+}
+
+/**
+ * @brief Deploy VM with proper isolation and metadata tracking
+ */
+bool VMOperations::deployVM(const json& vmParams) {
+    try {
+        // =========================
+        // 1) Isolation & Metadata
+        // =========================
+        std::string username = vmParams["username"].get<std::string>();
+        std::string displayName = vmParams.value("vmName", "my-instance");
+
+        if (displayName.length() > 50) {
+            displayName = displayName.substr(0, 50);
+        }
+
+        // Generate resource ID (AWS-style)
+        std::string resourceID = ResourceIDGenerator::generateVMID();
+
+        // Create internal libvirt name
+        std::string internalName =
+            IsolatedResourceNaming::createInternalVMName(username, resourceID);
+
+        std::cout << "Deploying VM:" << std::endl;
+        std::cout << "  User: " << username << std::endl;
+        std::cout << "  Display Name: " << displayName << std::endl;
+        std::cout << "  Resource ID: " << resourceID << std::endl;
+        std::cout << "  Internal Name: " << internalName << std::endl;
+
+        // Register resource BEFORE deployment
+        json additionalData = {
+            {"flavor", vmParams.value("flavor", "")},
+            {"baseImage", vmParams.value("baseImage", "")},
+            {"network", vmParams.value("network", "")}
+        };
+
+        g_metadataStore->registerResource(
+            resourceID,
+            internalName,
+            displayName,
+            username,
+            "vm",
+            additionalData
+        );
+
+        // Create modified params with internal name
+        json internalParams = vmParams;
+        internalParams["hostname"] = internalName;
+        internalParams["vmName"]   = internalName;
+
+        // =========================
+        // 2) Host Selection
+        // =========================
+        auto hostSelection = selectOptimalHost(internalParams);
+        if (!hostSelection.connection) {
+            return false;
+        }
+
+        // Update connection if host was selected
+        if (!hostSelection.hostname.empty()) {
+            conn = hostSelection.connection;
+        }
+
+        // Create remote executor
+        RemoteExec::RemoteExecutor remoteExec(conn);
+        fprintf(stdout, "📡 Target Host: %s\n\n", remoteExec.getHostInfo().c_str());
+
+        // =========================
+        // 3) Validation Phase
+        // =========================
+        if (!validateConnection()) return false;
+        if (!validateInputParameters(internalParams)) return false;
+
+        std::string hostname   = internalParams["hostname"];
+        std::string baseImageId = internalParams.value("baseImage", "");
+
+        if (!validateVMNameAvailability(hostname)) return false;
+        if (!validateRemoteDirectories(remoteExec)) return false;
+        if (!validateRemoteTools(remoteExec)) return false;
+        if (!validateBaseImage(remoteExec, baseImageId)) return false;
+        if (!validateDiskSpace(remoteExec, internalParams["disk"])) return false;
+        if (!validateNetwork()) return false;
+
+        // Print configuration
+        printConfiguration(internalParams);
+
+        // =========================
+        // 4) Cloud-init
+        // =========================
+        auto cloudInitConfig = createCloudInitConfig(internalParams);
+
+        // Auto-select base image if not specified
+        if (baseImageId.empty()) {
+            BaseImageManager imageManager(&remoteExec);
+            auto imagesList = imageManager.listImages();
+
+            if (imagesList["count"].get<int>() == 0) {
+                fprintf(stderr, "❌ No base images available on target host\n");
+                return false;
+            }
+
+            baseImageId = imagesList["images"][0]["id"];
+            fprintf(stdout, "ℹ️  No base image specified, using: %s\n",
+                    imagesList["images"][0]["displayName"].get<std::string>().c_str());
+        }
+
+        // Handle password hashing if needed
+        if (internalParams.value("authMethod", "password") == "password" &&
+            internalParams.contains("password") &&
+            !internalParams["password"].get<std::string>().empty()) {
+
+            std::string hashedPassword = hashPassword(remoteExec, internalParams["password"]);
+            if (hashedPassword.empty()) {
+                fprintf(stderr, "   ❌ Failed to generate password hash on target host\n");
+                return false;
+            }
+
+            // Insert password into user-data
+            size_t pos = cloudInitConfig.userData.find("    shell: /bin/bash\n");
+            if (pos != std::string::npos) {
+                std::string passwordSection =
+                    "    passwd: " + hashedPassword + "\n" +
+                    "    lock_passwd: false\n";
+                cloudInitConfig.userData.insert(pos + 24, passwordSection);
+            }
+        }
+
+        // =========================
+        // 5) Deployment Phase
+        // =========================
+        if (!writeCloudInitFiles(remoteExec, hostname, cloudInitConfig)) return false;
+        if (!createCloudInitISO(remoteExec, hostname)) return false;
+        if (!copyBaseImage(remoteExec, hostname, baseImageId)) return false;
+        if (!resizeDisk(remoteExec, hostname, internalParams["disk"])) return false;
+
+        fprintf(stdout, "Step 5/7: Creating VM definition...\n");
+        std::string xml = generateDomainXML(internalParams);
+        fprintf(stdout, "   ✅ VM definition created\n");
+
+        virDomainPtr domain = defineVM(xml);
+        if (!domain) return false;
+
+        bool started = startVM(domain);
+        virDomainFree(domain);
+
+        // =========================
+        // 6) Metadata Update
+        // =========================
+        if (started) {
+            g_metadataStore->updateResource(resourceID, username, {
+                {"status", "running"}
+            });
+        }
+
+        return started;
+
+    } catch (const std::exception& e) {
+        fprintf(stderr, "\n❌ Exception during deployment: %s\n", e.what());
+        return false;
+    }
+}
+
+/**
+ * @brief List VMs for a specific user (with isolation)
+ */
+json VMOperations::listUserVMs(const std::string& userId) {
     json result;
     result["success"] = false;
     
@@ -22,220 +214,391 @@ json VMOperations::getIP(const std::string& name) {
         return result;
     }
     
-    virDomainPtr domain = virDomainLookupByName(conn, name.c_str());
-    if (!domain) {
-        result["error"] = "VM not found";
+    // Get all VMs from libvirt
+    virDomainPtr* domains;
+    int numDomains = virConnectListAllDomains(conn, &domains, 0);
+    
+    if (numDomains < 0) {
+        result["error"] = "Error listing VMs";
         return result;
     }
     
-    // Check if domain is running
-    virDomainInfo info;
-    if (virDomainGetInfo(domain, &info) < 0 || info.state != VIR_DOMAIN_RUNNING) {
-        result["error"] = "VM is not running";
-        virDomainFree(domain);
-        return result;
-    }
+    json vms = json::array();
     
-    // Essayez d'abord l'agent QEMU Guest Agent (c'est le plus fiable)
-    virDomainInterfacePtr *ifaces = NULL;
-    int ifaces_count = virDomainInterfaceAddresses(domain, &ifaces,
-                                                   VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT, 0);
-    
-    // Si AGENT échoue, essayez LEASE (DHCP)
-    if (ifaces_count <= 0) {
-        ifaces_count = virDomainInterfaceAddresses(domain, &ifaces,
-                                                   VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE, 0);
-    }
-    
-    // Si les deux échouent, ARP (moins fiable)
-    if (ifaces_count <= 0) {
-        ifaces_count = virDomainInterfaceAddresses(domain, &ifaces,
-                                                   VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_ARP, 0);
-    }
-    
-    if (ifaces_count <= 0) {
-        // Dernière tentative : essayer de récupérer via les baux DHCP du réseau
-        result = getIPFromDHCPLeases(domain, name);
-        virDomainFree(domain);
-        return result;
-    }
-    
-    json interfaces = json::array();
-    bool foundIP = false;
-    
-    for (auto i = 0; i < ifaces_count; i++) {
-        json iface;
-        iface["name"] = ifaces[i]->name;
-        iface["hwaddr"] = ifaces[i]->hwaddr ? ifaces[i]->hwaddr : "";
+    // Filter VMs that belong to this user
+    for (int i = 0; i < numDomains; i++) {
+        const char* internalName = virDomainGetName(domains[i]);
         
-        json addrs = json::array();
-        for (auto j = 0; j < ifaces[i]->naddrs; j++) {
-            virDomainIPAddressPtr addr = &ifaces[i]->addrs[j];
+        // Check if user owns this VM
+        if (IsolatedResourceNaming::isOwner(internalName, userId)) {
+            // Extract resource ID
+            std::string resourceID = IsolatedResourceNaming::extractResourceID(internalName);
             
-            json addrInfo;
-            addrInfo["type"] = (addr->type == VIR_IP_ADDR_TYPE_IPV4) ? "ipv4" : "ipv6";
-            addrInfo["addr"] = addr->addr;
-            addrInfo["prefix"] = addr->prefix;
-            
-            addrs.push_back(addrInfo);
-            
-            if (addr->addr && strlen(addr->addr) > 0 && 
-                strcmp(addr->addr, "127.0.0.1") != 0) {
-                foundIP = true;
+            // Get metadata
+            json metadata = g_metadataStore->getResource(resourceID, userId);
+            if (metadata.contains("error")) {
+                virDomainFree(domains[i]);
+                continue;
             }
+            
+            // Get VM info
+            virDomainInfo info;
+            virDomainGetInfo(domains[i], &info);
+            
+            int id = virDomainGetID(domains[i]);
+            std::string state = getStateString(info.state);
+            bool isRunning = (info.state == VIR_DOMAIN_RUNNING);
+            
+            json vm = {
+                {"id", resourceID},  // Show opaque ID, not internal name
+                {"name", metadata["displayName"]},  // User-friendly name
+                {"state", state},
+                {"running", isRunning},
+                {"created", metadata["created"]},
+                {"tags", metadata.value("tags", json::object())},
+                {"stats", nullptr}
+            };
+            
+            if (isRunning) {
+                vm["stats"] = getVMStatsInternal(domains[i], internalName);
+            }
+            
+            vms.push_back(vm);
         }
         
-        iface["addrs"] = addrs;
-        interfaces.push_back(iface);
-        virDomainInterfaceFree(ifaces[i]);
+        virDomainFree(domains[i]);
     }
     
-    free(ifaces);
-    virDomainFree(domain);
-    
-    if (!foundIP) {
-        result["error"] = "No IP addresses found";
-        return result;
-    }
+    free(domains);
     
     result["success"] = true;
-    result["interfaces"] = interfaces;
-    
-    // Extract primary IP
-    for (const auto& iface : interfaces) {
-        for (const auto& addr : iface["addrs"]) {
-            if (addr["type"] == "ipv4" && addr["addr"] != "127.0.0.1") {
-                result["primaryIP"] = addr["addr"];
-                break;
-            }
-        }
-        if (result.contains("primaryIP")) break;
-    }
+    result["vms"] = vms;
+    result["count"] = vms.size();
     
     return result;
 }
 
-json VMOperations::getIPFromDHCPLeases(virDomainPtr domain, const std::string& name) {
+
+bool VMOperations::performVMAction(const std::string& resourceID, std::string userId, std::string action)
+{
+
+}
+
+/**
+ * @brief Get VM IP with network proxy support
+ */
+json VMOperations::getVMIP(const std::string& resourceID, const std::string& username) {
     json result;
     result["success"] = false;
     
-    // Récupérer le XML de la VM pour trouver le réseau
+    // Get internal name from resource ID
+    std::string internalName = g_metadataStore->getInternalName(resourceID, username);
+    if (internalName.empty()) {
+        result["error"] = "VM not found or access denied";
+        return result;
+    }
+    
+    // Get metadata to find network
+    json metadata = g_metadataStore->getResource(resourceID, username);
+    std::string networkName = metadata["data"].value("network", "default");
+    
+    // Use proxy service to get IP
+    if (g_proxyService) {
+        json ipResult = g_proxyService->getVMIP(internalName, networkName);
+        if (ipResult["success"].get<bool>()) {
+            result["success"] = true;
+            result["privateIP"] = ipResult["ip"];
+            result["method"] = ipResult["method"];
+            return result;
+        }
+    }
+    
+    result["error"] = "Could not determine VM IP";
+    return result;
+}
+
+/**
+ * @brief Get VNC info with tunnel creation
+ */
+json VMOperations::getVNCInfo(const std::string& resourceID, const std::string& username) {
+    json result;
+    result["success"] = false;
+    
+    // Get internal name
+    std::string internalName = g_metadataStore->getInternalName(resourceID, username);
+    if (internalName.empty()) {
+        result["error"] = "VM not found or access denied";
+        return result;
+    }
+    
+    // Get VM domain
+    virDomainPtr domain = virDomainLookupByName(conn, internalName.c_str());
+    if (!domain) {
+        result["error"] = "VM not found in libvirt";
+        return result;
+    }
+    
+    // Check if running
+    virDomainInfo info;
+    if (virDomainGetInfo(domain, &info) < 0 || info.state != VIR_DOMAIN_RUNNING) {
+        virDomainFree(domain);
+        result["error"] = "VM is not running";
+        return result;
+    }
+    
+    // Get VNC port from XML
     char* xmlDesc = virDomainGetXMLDesc(domain, 0);
     if (!xmlDesc) {
+        virDomainFree(domain);
         result["error"] = "Failed to get VM XML";
         return result;
     }
     
     std::string xml(xmlDesc);
     free(xmlDesc);
+    virDomainFree(domain);
     
-    // Parser le XML pour trouver l'adresse MAC
-    std::regex macRegex("<mac address='([^']+)'");
-    std::smatch macMatch;
-    std::string macAddress;
+    // Extract VNC port
+    std::regex vncRegex("<graphics type='vnc'[^>]*port='(\\d+)'");
+    std::smatch match;
     
-    if (std::regex_search(xml, macMatch, macRegex)) {
-        macAddress = macMatch[1].str();
+    int vncPort = -1;
+    if (std::regex_search(xml, match, vncRegex)) {
+        vncPort = std::stoi(match[1].str());
     }
     
-    if (macAddress.empty()) {
-        result["error"] = "Could not find MAC address in VM configuration";
+    if (vncPort == -1) {
+        result["error"] = "VNC not configured";
         return result;
     }
     
-    // Convertir MAC en format pour dnsmasq (minuscules, sans :)
-    std::string macLower = macAddress;
-    std::transform(macLower.begin(), macLower.end(), macLower.begin(), ::tolower);
-    macLower.erase(std::remove(macLower.begin(), macLower.end(), ':'), macLower.end());
+    // Get VM IP
+    json ipResult = getVMIP(resourceID, username);
+    if (!ipResult["success"].get<bool>()) {
+        result["error"] = "Could not get VM IP for VNC tunnel";
+        return result;
+    }
     
-    // Essayez de lire le fichier dnsmasq.leases
-    // Sur l'hôte distant, ce fichier est dans /var/lib/libvirt/dnsmasq/
-    RemoteExec::RemoteExecutor remoteExec(conn);
+    std::string vmIP = ipResult["privateIP"];
     
-    // Chercher dans différents chemins possibles
-    std::vector<std::string> leasePaths = {
-        "/var/lib/libvirt/dnsmasq/default.leases",
-        "/var/lib/libvirt/dnsmasq/*.leases",
-        "/var/lib/misc/dnsmasq.leases",
-        "/var/lib/dnsmasq/dnsmasq.leases"
-    };
-    
-    std::string ipAddress;
-    for (const auto& path : leasePaths) {
-        std::string cmd;
-        if (path.find('*') != std::string::npos) {
-            // Utiliser find pour les chemins avec wildcards
-            cmd = "for f in " + path + "; do [ -f \"$f\" ] && cat \"$f\"; done 2>/dev/null";
+    // Create VNC tunnel using proxy service
+    if (g_proxyService) {
+        json tunnelResult = g_proxyService->createVNCTunnel(
+            internalName, vmIP, vncPort, username
+        );
+        
+        if (tunnelResult["success"].get<bool>()) {
+            result["success"] = true;
+            result["vncURL"] = tunnelResult["vncURL"];
+            result["novncURL"] = tunnelResult["novncURL"];
+            result["tunnelID"] = tunnelResult["tunnelID"];
+            result["message"] = "VNC tunnel created. Use the provided URL to connect.";
+            return result;
         } else {
-            cmd = "sudo cat \"" + path + "\" 2>/dev/null || true";
-        }
-        
-        auto leaseResult = remoteExec.execute(cmd);
-        if (leaseResult.success() && !leaseResult.output.empty()) {
-            // Parser le fichier de baux
-            std::istringstream iss(leaseResult.output);
-            std::string line;
-            while (std::getline(iss, line)) {
-                // Format: timestamp mac ip hostname clientid
-                std::istringstream lineStream(line);
-                std::string timestamp, mac, ip, hostname, clientid;
-                lineStream >> timestamp >> mac >> ip >> hostname >> clientid;
-                
-                if (!mac.empty() && !ip.empty()) {
-                    // Comparer les MAC addresses (enlever les :)
-                    std::string leaseMac = mac;
-                    leaseMac.erase(std::remove(leaseMac.begin(), leaseMac.end(), ':'), leaseMac.end());
-                    
-                    if (leaseMac == macLower) {
-                        ipAddress = ip;
-                        break;
-                    }
-                }
-            }
-        }
-        if (!ipAddress.empty()) break;
-    }
-    
-    if (ipAddress.empty()) {
-        // Dernière tentative: utiliser arp sur l'hôte
-        std::string arpCmd = "sudo arp -n | grep -i " + macAddress + " | awk '{print $1}'";
-        auto arpResult = remoteExec.execute(arpCmd);
-        if (arpResult.success() && !arpResult.output.empty()) {
-            ipAddress = arpResult.output;
-            // Nettoyer la sortie
-            ipAddress.erase(std::remove(ipAddress.begin(), ipAddress.end(), '\n'), ipAddress.end());
+            result["error"] = "Failed to create VNC tunnel: " + 
+                             tunnelResult["error"].get<std::string>();
+            return result;
         }
     }
     
-    if (!ipAddress.empty()) {
+    result["error"] = "Proxy service not available";
+    return result;
+}
+
+/**
+ * @brief Start VM (with resource ID)
+ */
+bool VMOperations::startVM(const std::string& resourceID, const std::string& username) {
+    // Get internal name
+    std::string internalName = g_metadataStore->getInternalName(resourceID, username);
+    if (internalName.empty()) {
+        return false;
+    }
+    
+    virDomainPtr domain = virDomainLookupByName(conn, internalName.c_str());
+    if (!domain) {
+        return false;
+    }
+    
+    int ret = virDomainCreate(domain);
+    virDomainFree(domain);
+    
+    if (ret == 0) {
+        g_metadataStore->updateResource(resourceID, username, {
+            {"status", "running"}
+        });
+    }
+    
+    return ret == 0;
+}
+
+/**
+ * @brief Stop VM (with resource ID)
+ */
+bool VMOperations::shutdownVM(const std::string& resourceID, const std::string& username) {
+    std::string internalName = g_metadataStore->getInternalName(resourceID, username);
+    if (internalName.empty()) {
+        return false;
+    }
+    
+    virDomainPtr domain = virDomainLookupByName(conn, internalName.c_str());
+    if (!domain) {
+        return false;
+    }
+    
+    int ret = virDomainShutdown(domain);
+    virDomainFree(domain);
+    
+    if (ret == 0) {
+        g_metadataStore->updateResource(resourceID, username, {
+            {"status", "stopping"}
+        });
+    }
+    
+    return ret == 0;
+}
+
+/**
+ * @brief Delete VM (with cleanup)
+ */
+json VMOperations::deleteVM(const std::string& resourceID, 
+                           const std::string& username, 
+                           bool removeDisks) {
+    json result;
+    result["success"] = false;
+    
+    // Get internal name
+    std::string internalName = g_metadataStore->getInternalName(resourceID, username);
+    if (internalName.empty()) {
+        result["error"] = "VM not found or access denied";
+        return result;
+    }
+    
+    virDomainPtr domain = virDomainLookupByName(conn, internalName.c_str());
+    if (!domain) {
+        // VM doesn't exist in libvirt, but might be in metadata
+        g_metadataStore->deleteResource(resourceID, username);
         result["success"] = true;
-        result["primaryIP"] = ipAddress;
-        result["mac"] = macAddress;
-        result["method"] = "dhcp_lease";
-        
-        json interfaces = json::array();
-        json iface;
-        iface["name"] = "eth0";
-        iface["hwaddr"] = macAddress;
-        
-        json addrs = json::array();
-        json addrInfo;
-        addrInfo["type"] = "ipv4";
-        addrInfo["addr"] = ipAddress;
-        addrInfo["prefix"] = 24; // Par défaut
-        addrs.push_back(addrInfo);
-        
-        iface["addrs"] = addrs;
-        interfaces.push_back(iface);
-        
-        result["interfaces"] = interfaces;
+        result["message"] = "VM removed from system (not found in libvirt)";
+        return result;
+    }
+    
+    // Stop if running
+    stopVMIfRunning(domain);
+    
+    // Delete snapshots
+    deleteAllSnapshots(domain);
+    
+    // Get disk paths before undefining
+    std::vector<std::string> diskPaths;
+    if (removeDisks) {
+        diskPaths = getDiskPaths(domain);
+    }
+    
+    // Undefine VM
+    if (virDomainUndefine(domain) < 0) {
+        virDomainFree(domain);
+        result["error"] = "Failed to undefine VM";
+        return result;
+    }
+    
+    virDomainFree(domain);
+    
+    // Delete disk files
+    if (removeDisks && !diskPaths.empty()) {
+        deleteDiskFiles(diskPaths);
+    }
+    
+    // Remove from metadata
+    g_metadataStore->deleteResource(resourceID, username);
+    
+    result["success"] = true;
+    result["message"] = "VM deleted successfully";
+    return result;
+}
+
+/**
+ * @brief Create port forward for VM application access
+ */
+json VMOperations::createPortForward(const std::string& resourceID,
+                                    const std::string& username,
+                                    int vmPort,
+                                    const std::string& protocol) {
+    json result;
+    result["success"] = false;
+    
+    if (!g_proxyService) {
+        result["error"] = "Proxy service not available";
+        return result;
+    }
+    
+    // Get internal name and IP
+    std::string internalName = g_metadataStore->getInternalName(resourceID, username);
+    if (internalName.empty()) {
+        result["error"] = "VM not found or access denied";
+        return result;
+    }
+    
+    json ipResult = getVMIP(resourceID, username);
+    if (!ipResult["success"].get<bool>()) {
+        result["error"] = "Could not get VM IP";
+        return result;
+    }
+    
+    std::string vmIP = ipResult["privateIP"];
+    
+    // Create port forward
+    return g_proxyService->createPortForward(
+        internalName, vmIP, vmPort, protocol, username
+    );
+}
+
+/**
+ * @brief List port forwards for user's VMs
+ */
+json VMOperations::listPortForwards(const std::string& username) {
+    if (!g_proxyService) {
+        return {{"error", "Proxy service not available"}};
+    }
+    
+    return g_proxyService->listTunnels(username);
+}
+
+/**
+ * @brief Delete port forward
+ */
+bool VMOperations::deletePortForward(const std::string& forwardID, 
+                                    const std::string& username) {
+    if (!g_proxyService) {
+        return false;
+    }
+    
+    return g_proxyService->deleteTunnel(forwardID, username);
+}
+
+/**
+ * @brief Update VM display name or tags
+ */
+json VMOperations::updateVMMetadata(const std::string& resourceID,
+                                   const std::string& username,
+                                   const json& updates) {
+    json result;
+    result["success"] = false;
+    
+    if (!g_metadataStore->checkOwnership(resourceID, username)) {
+        result["error"] = "VM not found or access denied";
+        return result;
+    }
+    
+    if (g_metadataStore->updateResource(resourceID, username, updates)) {
+        result["success"] = true;
+        result["message"] = "VM metadata updated";
     } else {
-        result["error"] = "Could not find IP in DHCP leases or ARP table";
+        result["error"] = "Failed to update metadata";
     }
     
     return result;
 }
-
 
 
 json VMOperations::listSnapshots(const std::string& name) {
@@ -508,45 +871,6 @@ bool VMOperations::deleteAllSnapshots(virDomainPtr domain) {
     return allSuccess;
 }
 
-std::vector<std::string> VMOperations::getDiskPaths(virDomainPtr domain) {
-    std::vector<std::string> diskPaths;
-    
-    if (!domain) return diskPaths;
-    
-    char* xmlDesc = virDomainGetXMLDesc(domain, 0);
-    if (!xmlDesc) {
-        fprintf(stderr, "Failed to get domain XML\n");
-        return diskPaths;
-    }
-    
-    std::string xml(xmlDesc);
-    free(xmlDesc);
-    
-    // Extract all disk file paths from XML
-    // Look for: <source file='/path/to/disk.qcow2'/>
-    std::regex diskRegex("<source file='([^']+)'");
-    std::sregex_iterator iter(xml.begin(), xml.end(), diskRegex);
-    std::sregex_iterator end;
-    
-    while (iter != end) {
-        std::smatch match = *iter;
-        std::string diskPath = match[1].str();
-        
-        // Skip ISO files and cloud-init ISOs (they're typically temporary)
-        if (diskPath.find(".iso") != std::string::npos && 
-            diskPath.find("cloud-init") == std::string::npos) {
-            // Skip regular ISO files
-            continue;
-        }
-        diskPaths.push_back(diskPath);
-        fprintf(stdout, "Found disk: %s\n", diskPath.c_str());
-        
-        ++iter;
-    }
-    
-    return diskPaths;
-}
-
 
 // ========================================
 // DELETE METHODS
@@ -622,7 +946,7 @@ bool VMOperations::deleteAllVMs(std::string& username)
             auto nameInfo = nameManager.parseVMName(name);
             std::string displayName = nameInfo.valid ? nameInfo.vmName : name;
             
-           deleteVM(displayName, true);
+           deleteVM(displayName, username, true);
         }
         virDomainFree(domains[i]);
     }
@@ -632,117 +956,6 @@ bool VMOperations::deleteAllVMs(std::string& username)
     return true;    
 }
 
-
-json VMOperations::deleteVM(const std::string& name, bool removeDisks=true) {
-    json result;
-    result["success"] = false;
-    result["steps"] = json::array();
-    
-    if (!conn) {
-        result["error"] = "Not connected to libvirt";
-        return result;
-    }
-      
-    // Step 1: Lookup domain
-    virDomainPtr domain = virDomainLookupByName(conn, name.c_str());
-    if (!domain) {
-        virErrorPtr err = virGetLastError();
-        std::string errorMsg = "VM not found";
-        if (err) {
-            errorMsg += ": " + std::string(err->message);
-        }
-        result["error"] = errorMsg;
-        return result;
-    }
-    
-    std::vector<std::string> diskPaths;
-    
-    // Step 2: Get disk paths (before undefining, if we need to remove them)
-    if (removeDisks) {
-        result["steps"].push_back("Getting disk paths...");
-        diskPaths = getDiskPaths(domain);
-        
-        if (!diskPaths.empty()) {
-            result["diskPaths"] = diskPaths;
-            fprintf(stdout, "Found %zu disk(s) to remove\n", diskPaths.size());
-        }
-    }
-    
-    // Step 3: Stop VM if running
-    result["steps"].push_back("Checking VM state...");
-    if (!stopVMIfRunning(domain)) {
-        result["error"] = "Failed to stop VM";
-        result["steps"].push_back("ERROR: Failed to stop VM");
-        virDomainFree(domain);
-        return result;
-    }
-    result["steps"].push_back("VM stopped successfully");
-    
-    // Step 4: Delete all snapshots
-    result["steps"].push_back("Deleting snapshots...");
-    if (!deleteAllSnapshots(domain)) {
-        result["warning"] = "Some snapshots could not be deleted";
-        result["steps"].push_back("WARNING: Some snapshots failed to delete");
-    } else {
-        result["steps"].push_back("Snapshots deleted successfully");
-    }
-    
-    // Step 5: Undefine the domain
-    result["steps"].push_back("Undefining VM...");
-    
-    // Use VIR_DOMAIN_UNDEFINE_MANAGED_SAVE to remove saved state
-    // Use VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA to remove snapshot metadata
-    unsigned int undefineFlags = VIR_DOMAIN_UNDEFINE_MANAGED_SAVE | 
-                                 VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA;
-    
-    if (virDomainUndefineFlags(domain, undefineFlags) < 0) {
-        // Try simple undefine as fallback
-        if (virDomainUndefine(domain) < 0) {
-            virErrorPtr err = virGetLastError();
-            std::string errorMsg = "Failed to undefine VM";
-            if (err) {
-                errorMsg += ": " + std::string(err->message);
-            }
-            result["error"] = errorMsg;
-            result["steps"].push_back("ERROR: " + errorMsg);
-            virDomainFree(domain);
-            return result;
-        }
-    }
-    
-    result["steps"].push_back("VM undefined successfully");
-    fprintf(stdout, "VM '%s' undefined successfully\n", name.c_str());
-    
-    // Free domain handle
-    virDomainFree(domain);
-    
-    // Step 6: Delete disk files (if requested)
-    if (removeDisks && !diskPaths.empty()) {
-        result["steps"].push_back("Deleting disk files...");
-        
-        if (deleteDiskFiles(diskPaths)) {
-            result["steps"].push_back("All disk files deleted successfully");
-            result["disksDeleted"] = true;
-        } else {
-            result["warning"] = "Some disk files could not be deleted";
-            result["steps"].push_back("WARNING: Some disk files failed to delete");
-            result["disksDeleted"] = false;
-        }
-    } else if (removeDisks && diskPaths.empty()) {
-        result["steps"].push_back("No disk files found to delete");
-        result["disksDeleted"] = false;
-    }
-    
-    // Success!
-    result["success"] = true;
-    result["message"] = "VM deleted successfully";
-    
-    fprintf(stdout, "\n========================================\n");
-    fprintf(stdout, "VM '%s' deleted successfully!\n", name.c_str());
-    fprintf(stdout, "========================================\n\n");
-    
-    return result;
-}
 
 bool VMOperations::undefineVM(const std::string& name) {
     if (!conn) return false;
@@ -901,189 +1114,6 @@ json VMOperations::getVMIP(const std::string& vmName) {
     return result;
 }
 
-json VMOperations::createPortForward(const std::string& vmName, int vmPort, 
-                                     int hostPort, const std::string& protocol) {
-    json result;
-    result["success"] = false;
-    
-    // Get VM IP first
-    auto ipResult = getVMIP(vmName);
-    if (!ipResult["success"].get<bool>() || ipResult["primaryIP"].get<std::string>().empty()) {
-        result["error"] = "Could not determine VM IP address";
-        return result;
-    }
-    
-    std::string vmIP = ipResult["primaryIP"];
-    
-    // If no host port specified, auto-assign one
-    if (hostPort == 0) {
-        hostPort = findAvailablePort(10000, 60000);
-        if (hostPort == -1) {
-            result["error"] = "No available ports for forwarding";
-            return result;
-        }
-    }
-    
-    // Check if port is already in use
-    if (isPortInUse(hostPort)) {
-        result["error"] = "Host port " + std::to_string(hostPort) + " is already in use";
-        return result;
-    }
-    
-    // Create iptables NAT rule
-    RemoteExec::RemoteExecutor remoteExec(conn);
-    
-    // DNAT rule: Forward incoming traffic on hostPort to VM
-    std::stringstream dnatCmd;
-    dnatCmd << "iptables -t nat -A PREROUTING "
-            << "-p " << protocol << " --dport " << hostPort << " "
-            << "-j DNAT --to-destination " << vmIP << ":" << vmPort;
-    
-    auto dnatResult = remoteExec.execute("sudo " + dnatCmd.str());
-    
-    if (!dnatResult.success()) {
-        result["error"] = "Failed to create DNAT rule: " + dnatResult.output;
-        return result;
-    }
-    
-    // MASQUERADE rule: Allow forwarded traffic to be NAT'd
-    std::stringstream masqCmd;
-    masqCmd << "iptables -t nat -A POSTROUTING "
-            << "-p " << protocol << " -d " << vmIP << " --dport " << vmPort << " "
-            << "-j MASQUERADE";
-    
-    auto masqResult = remoteExec.execute("sudo " + masqCmd.str());
-    
-    if (!masqResult.success()) {
-        // Rollback DNAT rule
-        std::stringstream rollbackCmd;
-        rollbackCmd << "iptables -t nat -D PREROUTING "
-                   << "-p " << protocol << " --dport " << hostPort << " "
-                   << "-j DNAT --to-destination " << vmIP << ":" << vmPort;
-        remoteExec.execute("sudo " + rollbackCmd.str());
-        
-        result["error"] = "Failed to create MASQUERADE rule: " + masqResult.output;
-        return result;
-    }
-    
-    // Save the port forward mapping
-    std::string forwardId = savePortForward(vmName, vmIP, vmPort, hostPort, protocol);
-    
-    result["success"] = true;
-    result["forwardId"] = forwardId;
-    result["vmPort"] = vmPort;
-    result["hostPort"] = hostPort;
-    result["protocol"] = protocol;
-    result["vmIP"] = vmIP;
-    
-    return result;
-}
-
-json VMOperations::listPortForwards(const std::string& vmName) {
-    json result;
-    result["success"] = false;
-    
-    // Load port forwards from file
-    std::string forwardsFile = "/var/lib/thoth-cloud/port_forwards.json";
-    json forwards = json::array();
-    
-    std::ifstream file(forwardsFile);
-    if (file.is_open()) {
-        try {
-            json allForwards;
-            file >> allForwards;
-            file.close();
-            
-            // Filter by VM name
-            for (const auto& fwd : allForwards) {
-                if (fwd["vmName"] == vmName) {
-                    forwards.push_back(fwd);
-                }
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Error loading port forwards: " << e.what() << std::endl;
-        }
-    }
-    
-    result["success"] = true;
-    result["forwards"] = forwards;
-    result["count"] = forwards.size();
-    
-    return result;
-}
-
-json VMOperations::deletePortForward(const std::string& vmName, const std::string& forwardId) {
-    json result;
-    result["success"] = false;
-    
-    std::string forwardsFile = "/var/lib/thoth-cloud/port_forwards.json";
-    json allForwards = json::array();
-    json forwardToDelete;
-    bool found = false;
-    
-    // Load existing forwards
-    std::ifstream inFile(forwardsFile);
-    if (inFile.is_open()) {
-        try {
-            inFile >> allForwards;
-            inFile.close();
-        } catch (const std::exception& e) {
-            allForwards = json::array();
-        }
-    }
-    
-    // Find and remove the forward
-    json newForwards = json::array();
-    for (const auto& fwd : allForwards) {
-        if (fwd["id"] == forwardId && fwd["vmName"] == vmName) {
-            forwardToDelete = fwd;
-            found = true;
-        } else {
-            newForwards.push_back(fwd);
-        }
-    }
-    
-    if (!found) {
-        result["error"] = "Port forward not found";
-        return result;
-    }
-    
-    // Remove iptables rules
-    RemoteExec::RemoteExecutor remoteExec(conn);
-    
-    std::string vmIP = forwardToDelete["vmIP"];
-    int vmPort = forwardToDelete["vmPort"];
-    int hostPort = forwardToDelete["hostPort"];
-    std::string protocol = forwardToDelete["protocol"];
-    
-    // Remove DNAT rule
-    std::stringstream dnatCmd;
-    dnatCmd << "iptables -t nat -D PREROUTING "
-            << "-p " << protocol << " --dport " << hostPort << " "
-            << "-j DNAT --to-destination " << vmIP << ":" << vmPort;
-    
-    remoteExec.execute("sudo " + dnatCmd.str());
-    
-    // Remove MASQUERADE rule
-    std::stringstream masqCmd;
-    masqCmd << "iptables -t nat -D POSTROUTING "
-            << "-p " << protocol << " -d " << vmIP << " --dport " << vmPort << " "
-            << "-j MASQUERADE";
-    
-    remoteExec.execute("sudo " + masqCmd.str());
-    
-    // Save updated forwards
-    std::ofstream outFile(forwardsFile);
-    if (outFile.is_open()) {
-        outFile << newForwards.dump(2);
-        outFile.close();
-    }
-    
-    result["success"] = true;
-    result["message"] = "Port forward deleted";
-    
-    return result;
-}
 
 // Helper methods
 

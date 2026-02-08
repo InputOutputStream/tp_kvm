@@ -1,4 +1,6 @@
 #include "../include/network_manager.hpp"
+#include "../include/isolation_utils.hpp"
+
 #include <libvirt/virterror.h>
 #include <fstream>
 #include <sstream>
@@ -314,94 +316,76 @@ std::string NetworkManager::generateSwarmNetworkXML(const std::string& networkId
     return xml.str();
 }
 
-json NetworkManager::createUserNetwork(const std::string& username, const std::string& networkName) {
+
+json NetworkManager::createUserNetwork(const std::string& username, 
+                                      const std::string& networkName) {
     json result;
     result["success"] = false;
     
-    if (!conn) {
-        result["error"] = "Not connected to libvirt";
-        return result;
-    }
-    
-    // Validate network name
-    if (networkName.empty()) {
-        result["error"] = "Network name cannot be empty";
-        return result;
-    }
-    
-    // Sanitize the network name
-    std::string sanitizedName = sanitizeNetworkName(networkName);
-    
-    // Check if network name already exists for this user
-    if (networkNameExists(username, sanitizedName)) {
-        result["error"] = "A network with this name already exists";
-        return result;
-    }
-    
     // Check network limit
-    int currentCount = getUserNetworkCount(username);
-    if (currentCount >= MAX_USER_NETWORKS) {
-        result["error"] = "Maximum network limit reached (" + std::to_string(MAX_USER_NETWORKS) + ")";
-        result["currentCount"] = currentCount;
-        result["maxAllowed"] = MAX_USER_NETWORKS;
+    if (getUserNetworkCount(username) >= MAX_USER_NETWORKS) {
+        result["error"] = "Maximum number of networks reached";
         return result;
     }
     
-    // Generate unique network ID (for internal tracking only)
-    std::string networkId = generateNetworkId();
+    // Generate resource ID
+    std::string resourceID = ResourceIDGenerator::generateNetworkID();
+    
+    // Create internal name
+    std::string internalName = IsolatedResourceNaming::createInternalNetworkName(
+        username, resourceID
+    );
     
     // Generate subnet
     std::string subnet = generateSubnet();
     if (subnet.empty()) {
-        result["error"] = "Failed to generate available subnet";
+        result["error"] = "Failed to generate subnet";
         return result;
     }
     
-    // Generate XML - use sanitizedName as the network name
-    std::string xml = generateUserNetworkXML(networkId, sanitizedName, subnet);
+    // Generate XML
+    std::string xml = generateUserNetworkXML(internalName, networkName, subnet);
     
-    // Define network
+    // Define network in libvirt
     virNetworkPtr network = virNetworkDefineXML(conn, xml.c_str());
     if (!network) {
         result["error"] = "Failed to define network";
         return result;
     }
     
-    // Set autostart
-    virNetworkSetAutostart(network, 1);
-    
     // Start network
     if (virNetworkCreate(network) < 0) {
-        virNetworkUndefine(network);
         virNetworkFree(network);
         result["error"] = "Failed to start network";
         return result;
     }
     
-    // Save to config - networkName and displayName are the same
-    json networkInfo = {
-        {"networkId", networkId},
-        {"networkName", sanitizedName},
-        {"displayName", sanitizedName},
+    // Auto-start network
+    virNetworkSetAutostart(network, 1);
+    virNetworkFree(network);
+    
+    // Store metadata
+    json networkData = {
+        {"networkId", resourceID},
+        {"networkName", internalName},  // libvirt name
+        {"displayName", networkName},   // user-friendly name
         {"subnet", subnet},
         {"owner", username},
         {"type", "user"},
-        {"created", std::time(nullptr)},
+        {"created", time(nullptr)},
         {"active", true}
     };
     
-    networksConfig["userNetworks"].push_back(networkInfo);
+    networksConfig["userNetworks"].push_back(networkData);
     networksConfig["usedSubnets"].push_back(subnet);
     saveNetworksConfig();
     
-    virNetworkFree(network);
-    
     result["success"] = true;
-    result["networkId"] = networkId;
-    result["networkName"] = sanitizedName;
-    result["displayName"] = sanitizedName;
-    result["subnet"] = subnet;
-    result["message"] = "User network created successfully";
+    result["network"] = {
+        {"id", resourceID},
+        {"name", networkName},
+        {"subnet", subnet}
+    };
     
     return result;
 }

@@ -77,7 +77,6 @@ function updateProgressStep(stepNum, status) {
 }
 
 
-
 function renderFlavorCards(flavors) {
     const flavorContainer = document.querySelector('.flavor-cards');
     if (!flavorContainer) return;
@@ -88,6 +87,11 @@ function renderFlavorCards(flavors) {
         const card = document.createElement('label');
         card.className = 'flavor-card';
         
+        // Calculate total price including storage
+        const basePrice = window.PRICING?.VM[flavor.name?.toUpperCase()] || flavor.price || 0;
+        const storagePrice = (flavor.specs.disk * window.PRICING?.STORAGE) || 0;
+        const totalPrice = basePrice + storagePrice;
+        
         card.innerHTML = `
             <input type="radio" name="flavor" value="${flavor.id}" ${index === 0 ? 'checked' : ''}>
             <div class="flavor-content">
@@ -97,7 +101,7 @@ function renderFlavorCards(flavors) {
                     ${flavor.specs.ram} MB RAM • 
                     ${flavor.specs.disk} GB Disk
                 </p>
-                <p class="flavor-price">${flavor.priceFormatted}</p>
+                <p class="flavor-price">${totalPrice.toLocaleString()} FCFA/month</p>
             </div>
         `;
         

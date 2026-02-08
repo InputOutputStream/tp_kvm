@@ -724,7 +724,7 @@ json SwarmOperations::removeNode(const std::string& clusterId, const std::string
     }
     
     // Delete the VM
-    vmOps->deleteVM(vmName, true);
+    vmOps->deleteVM(vmName, cluster.owner,  true);
     
     // Remove from cluster
     cluster.nodes.erase(nodeIt);
@@ -805,7 +805,7 @@ json SwarmOperations::waitForVMReady(const std::string& vmName, int maxWaitSecon
             continue;
         }
         
-        auto ipResult = vmOps->getIP(vmName);
+        auto ipResult = vmOps->getVMIP(vmName);
         if (ipResult["success"].get<bool>()) {
             std::cout << "  ✅ " << vmName << " is ready (IP: " 
                      << ipResult["primaryIP"].get<std::string>() << ")" << std::endl;
@@ -822,7 +822,7 @@ json SwarmOperations::waitForVMReady(const std::string& vmName, int maxWaitSecon
 }
 
 json SwarmOperations::getVMIP(const std::string& vmName) {
-    return vmOps->getIP(vmName);
+    return vmOps->getVMIP(vmName);
 }
 
 // ============================================================================
@@ -1141,7 +1141,7 @@ json SwarmOperations::deleteCluster(const std::string& clusterId) {
     // Delete all VMs (delegated to VMOperations)
     for (const auto& node : cluster.nodes) {
         std::cout << "  Deleting VM: " << node.vmName << std::endl;
-        vmOps->deleteVM(node.vmName, true);
+        vmOps->deleteVM(node.vmName, cluster.owner, true);
     }
     
     // Delete network (delegated to NetworkManager)

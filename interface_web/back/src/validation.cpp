@@ -154,6 +154,16 @@ ValidationResult Validator::validateDisk(int disk) {
     return result;
 }
 
+
+// ==========================================
+// Dcoker VALIDATION
+// ==========================================
+
+
+ValidationResult Validator::sanitizeDockerName(std::string name){
+    
+}
+
 // ==========================================
 // USER VALIDATION
 // ==========================================

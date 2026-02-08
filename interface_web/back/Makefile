@@ -1,6 +1,10 @@
 CXX = g++
-CXXFLAGS = -g -std=c++17 -Wall -Wextra  
-LDFLAGS = -lvirt -lpthread -lssl -lcrypto
+CXXFLAGS = -g -std=c++17 -Wall -Wextra -D_FORTIFY_SOURCE=2 \
+    -fstack-protector-strong \
+    -fPIE -pie \
+    -O2 \
+
+LDFLAGS = -lvirt -lpthread -lssl -lcrypto -lpthread
 
 # Directories
 SRC_DIR = src

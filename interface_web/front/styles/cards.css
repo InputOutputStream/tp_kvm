@@ -645,6 +645,30 @@
     }
 }
 
+
+.flavor-price {
+    font-weight: bold;
+    color: var(--primary-color);
+    font-size: 1.1em;
+    margin-top: 8px;
+}
+
+.catalog-price-badge {
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    margin-top: 10px;
+    display: inline-block;
+}
+
+.vm-card-price {
+    color: var(--success-color);
+    font-weight: 600;
+    margin-top: 5px;
+}
+
 /* ==========================================
    CARD ANIMATIONS
    ========================================== */

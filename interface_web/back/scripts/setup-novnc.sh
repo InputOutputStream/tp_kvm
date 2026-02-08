@@ -90,3 +90,6 @@ else
     systemctl status novnc
     exit 1
 fi
+
+
+

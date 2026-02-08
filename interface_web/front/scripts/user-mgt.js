@@ -25,6 +25,29 @@ const UserManagement = {
             tableBody.innerHTML = `<tr><td colspan="6" class="error-text">Error: ${error.message}</td></tr>`;
             showToast(`Error loading users: ${error.message}`, 'error');
         }
+
+        // Add filter controls
+        const container = document.getElementById('users-list');
+        if (container) {
+            container.innerHTML = `
+                <div class="users-controls">
+                    <input type="text" id="user-search" 
+                        placeholder="🔍 Search users..." 
+                        oninput="UserManagement.filterUsers(this.value)">
+                    <div class="filter-buttons">
+                        <button class="btn btn-sm ${this.currentFilter === 'all' ? 'active' : ''}" 
+                                onclick="UserManagement.filterByRole('all')">All</button>
+                        <button class="btn btn-sm ${this.currentFilter === 'admin' ? 'active' : ''}" 
+                                onclick="UserManagement.filterByRole('admin')">Admins</button>
+                        <button class="btn btn-sm ${this.currentFilter === 'user' ? 'active' : ''}" 
+                                onclick="UserManagement.filterByRole('user')">Users</button>
+                    </div>
+                </div>
+                <div id="users-table-container">
+                    ${tableHTML}
+                </div>
+            `;
+        }
     },
     
     // Render users in table format

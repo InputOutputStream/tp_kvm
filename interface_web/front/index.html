@@ -248,9 +248,23 @@
             </div>
 
             <div id="vms-list" class="vm-cards-grid">
-                <p class="loading-text">Loading virtual machines...</p>
+                <!-- <p class="loading-text">Loading virtual machines...</p> -->
+                    <div class="vm-card" onclick="selectVM('vm-name')">
+                        <div class="vm-card-header">
+                            <h3>🖥️ VM Name</h3>
+                            <span class="vm-card-status running">🟢 Running</span>
+                        </div>
+                        <div class="vm-card-body">
+                            <p>Resources: 2 vCPU, 4GB RAM</p>
+                            <p class="vm-card-price">3,500 FCFA/month</p>
+                        </div>
+                        <div class="vm-card-actions">
+                            <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); startVM()">▶️</button>
+                            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); showDeleteVMModal()">🗑️</button>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
 
         <!-- Deploy VM View -->
         <div id="view-deploy" class="view">
@@ -461,7 +475,7 @@
                         <span>🚀</span>
                         Deploy New App
                     </button>
-                    <button class="btn btn-secondary" onclick="window.paasManager.refreshApps()">
+                    <button class="btn btn-secondary" onclick="window.refreshApps()">
                         <span>🔄</span>
                         Refresh
                     </button>
@@ -471,29 +485,7 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Quick Deploy Section -->
-            <div class="quick-deploy-section">
-                <div class="deploy-cards">
-                    <div class="deploy-card" onclick="paasWizard.selectApp('wordpress')">
-                        <div class="deploy-icon">📝</div>
-                        <h4>Deploy WordPress</h4>
-                        <p>One-click WordPress with database</p>
-                        <span class="deploy-badge">Popular</span>
-                    </div>
-                    <div class="deploy-card" onclick="paasWizard.selectApp('nextcloud')">
-                        <div class="deploy-icon">☁️</div>
-                        <h4>Deploy NextCloud</h4>
-                        <p>Private cloud storage</p>
-                    </div>
-                    <div class="deploy-card" onclick="paasWizard.selectApp('grafana')">
-                        <div class="deploy-icon">📈</div>
-                        <h4>Deploy Grafana</h4>
-                        <p>Monitoring dashboards</p>
-                    </div>
-                </div>
-            </div>
-
+           
             <div class="stats-grid" style="margin-bottom: 20px;">
                 <div class="stat-card">
                     <div class="stat-icon">📦</div>
@@ -998,34 +990,36 @@
         </div>
     </div>
 
-    <script src="scripts/auth.js"></script>
-    <script src="scripts/theme.js"></script>
-    <script src="scripts/networks.js"></script>
-    <script src="scripts/navigation.js"></script>
-    <script src="scripts/hosts.js"></script>
-    <script src="scripts/swarm.js"></script>
-    <script src="scripts/deploy.js"></script>
-    <script src="scripts/modals.js"></script> 
-    <script src="scripts/profil.js"></script>  
-    <script src="scripts/users.js"></script>
-    <script src="scripts/swarm-services.js"></script>
     
-    <!-- New API and UI Components -->
-    <script src="scripts/api-service.js"></script>
-    <script src="scripts/host-ui-components.js"></script>
-    <script src="scripts/paas-deployment-wizard.js"></script>
-    <script src="scripts/monitoring-dashboard.js"></script>
-    <script src="scripts/state-manager.js"></script>
-    <script src="scripts/paas-controler.js"></script> 
-    <script src="scripts/vms.js"></script>  
+<!-- Core Infrastructure -->
+<script src="scripts/auth.js"></script>
+<script src="scripts/theme.js"></script>
+<script src="scripts/api-service.js"></script>
+<script src="scripts/state-manager.js"></script>
+<script src="scripts/navigation.js"></script>
 
-    <!-- New Frontend Modules -->
-    <script src="scripts/user-mgt.js"></script>
-    <script src="scripts/vm-clone.js"></script>
-    <script src="scripts/vnc.js"></script>
-    <script src="scripts/billing.js"></script>
-    <script src="scripts/vm-deletion.js"></script>
-    
-    <script src="scripts/main.js"></script>
+<!-- Controllers -->
+<script src="scripts/vms.js"></script>
+<script src="scripts/paas-controler.js"></script>
+<script src="scripts/monitoring-dashboard.js"></script>
+
+<!-- Management Modules -->
+<script src="scripts/user-mgt.js"></script>
+<script src="scripts/networks.js"></script>
+<script src="scripts/swarm.js"></script>
+<script src="scripts/swarm-services.js"></script>
+<script src="scripts/billing.js"></script>
+
+<!-- UI Components -->
+<script src="scripts/deploy.js"></script>
+<script src="scripts/modals.js"></script>
+<script src="scripts/profil.js"></script>
+<script src="scripts/vm-clone.js"></script>
+<script src="scripts/vnc.js"></script>
+<script src="scripts/paas-deployment-wizard.js"></script>
+
+<script src="scripts/app-init.js"></script>
+
+<script src="scripts/main.js"></script>
 </body>
 </html>

@@ -3,40 +3,43 @@
 #include "../include/utils.hpp"
 #include <openssl/sha.h>
 #include <iomanip>
-
-
 #include <fstream>
 #include <iostream>
 #include <sys/stat.h>
 
 UserOperations::UserOperations(virConnectPtr connection, NetworkManager* netWMgr) 
-    : conn(connection), networkManager(netWMgr), usersFile("/var/lib/thoth-cloud/users.json") {
+    : conn(connection), networkManager(netWMgr), 
+      usersFile("/var/lib/thoth-cloud/users.json"),
+      sessionsFile("/var/lib/thoth-cloud/sessions.json") {
     loadUsers();
-    loadSessions(); // Load persisted sessions
+    loadSessions();
 }
-
 
 void UserOperations::loadSessions() {
     std::ifstream file(sessionsFile);
     if (file.is_open()) {
-        json sessionsJson;
-        file >> sessionsJson;
-        file.close();
-        
-        for (auto& [token, session] : sessionsJson.items()) {
-            UserSession userSession;
-            userSession.username = session["username"];
-            userSession.role = session["role"];
-            userSession.expiry = session["expiry"];
+        try {
+            json sessionsJson;
+            file >> sessionsJson;
+            file.close();
             
-            // Check if token is still valid (not expired)
-            if (userSession.expiry > std::time(nullptr)) {
-                sessions[token] = userSession;
+            auto now = getCurrentTimeMs();
+            for (auto& [token, session] : sessionsJson.items()) {
+                UserSession userSession;
+                userSession.username = session["username"];
+                userSession.role = session["role"];
+                userSession.expiry = session["expiry"];
+                
+                // Check if token is still valid (not expired)
+                if (userSession.expiry > now) {
+                    sessions[token] = userSession;
+                }
             }
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading sessions: " << e.what() << std::endl;
         }
     }
 }
-
 
 bool UserOperations::saveSessions() {
     json sessionsJson;
@@ -48,12 +51,24 @@ bool UserOperations::saveSessions() {
         };
     }
     
-    std::ofstream file(sessionsFile);
-    if (!file.is_open()) return false;
+    // Ensure directory exists
+    std::string dir = "/var/lib/thoth-cloud";
+    mkdir(dir.c_str(), 0755);
     
-    file << sessionsJson.dump(2);
-    file.close();
-    return true;
+    std::ofstream file(sessionsFile);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open sessions file for writing" << std::endl;
+        return false;
+    }
+    
+    try {
+        file << sessionsJson.dump(2);
+        file.close();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving sessions: " << e.what() << std::endl;
+        return false;
+    }
 }
 
 void UserOperations::loadUsers() {
@@ -74,17 +89,17 @@ void UserOperations::loadUsers() {
 // Hash password with SHA-256
 std::string UserOperations::hashPassword(const std::string& password) {
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256((unsigned char*)password.c_str(), password.length(), hash);
+    SHA256(reinterpret_cast<const unsigned char*>(password.c_str()), password.length(), hash);
     
     std::stringstream ss;
     for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
     }
     return ss.str();
 }
 
 std::string UserOperations::generateToken(const std::string& username) {
-    // Simple token: username + No of users + hash
+    // Simple token: username + timestamp + hash
     auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::string tokenData = username + std::to_string(now);
     return hashPassword(tokenData);
@@ -111,7 +126,6 @@ bool UserOperations::saveUsers() {
     }
 }
 
-
 bool UserOperations::validateToken(const std::string& token, std::string& username, std::string& role) {
     std::lock_guard<std::mutex> lock(sessions_mutex);
     
@@ -121,8 +135,10 @@ bool UserOperations::validateToken(const std::string& token, std::string& userna
     }
     
     // Check if token has expired (1 hour expiry)
-    if (it->second.expiry < getCurrentTimeMs()) {
+    auto now = getCurrentTimeMs();
+    if (it->second.expiry < now) {
         sessions.erase(it);
+        saveSessions();  // Persist the removal
         return false;
     }
     
@@ -130,7 +146,8 @@ bool UserOperations::validateToken(const std::string& token, std::string& userna
     role = it->second.role;
     
     // Update expiry (refresh on each use)
-    it->second.expiry = getCurrentTimeMs() + 3600000; // 1 hour
+    it->second.expiry = now + 3600000; // 1 hour
+    saveSessions();  // Persist the update
     
     return true;
 }
@@ -145,7 +162,7 @@ json UserOperations::authenticate(const std::string& username, const std::string
             std::string storedHash = user.value("passwordHash", "");
             std::string inputHash = hashPassword(password);
             
-            if (storedHash == inputHash && user["active"].get<bool>()) {
+            if (storedHash == inputHash && user.value("active", false)) {
                 // Generate token
                 std::string token = generateToken(username);
                 
@@ -157,6 +174,7 @@ json UserOperations::authenticate(const std::string& username, const std::string
                     session.role = user["role"].get<std::string>();
                     session.expiry = getCurrentTimeMs() + 3600000; // 1 hour
                     sessions[token] = session;
+                    saveSessions();  // Persist immediately
                 }
                 
                 result["success"] = true;
@@ -170,7 +188,7 @@ json UserOperations::authenticate(const std::string& username, const std::string
                 };
                 return result;
             } else {
-                result["error"] = "Invalid password";
+                result["error"] = "Invalid password or account inactive";
                 return result;
             }
         }
@@ -184,13 +202,19 @@ json UserOperations::authenticate(const std::string& username, const std::string
 void UserOperations::cleanupExpiredSessions() {
     std::lock_guard<std::mutex> lock(sessions_mutex);
     auto now = getCurrentTimeMs();
+    bool changed = false;
     
     for (auto it = sessions.begin(); it != sessions.end(); ) {
         if (it->second.expiry < now) {
             it = sessions.erase(it);
+            changed = true;
         } else {
             ++it;
         }
+    }
+    
+    if (changed) {
+        saveSessions();
     }
 }
 
@@ -242,6 +266,9 @@ json UserOperations::createUser(const json& userData) {
             json networkResult = networkManager->createUserNetwork(username, "default");
             if (networkResult["success"].get<bool>()) {
                 newUser["defaultNetwork"] = networkResult["network"]["networkId"];
+                // Update the user in the array with default network
+                users[users.size() - 1]["defaultNetwork"] = networkResult["network"]["networkId"];
+                saveUsers();  // Save again with network info
             }
         }
     
@@ -249,17 +276,26 @@ json UserOperations::createUser(const json& userData) {
         result["user"] = newUser;
         result["user"].erase("passwordHash"); // Don't send hash
     } else {
+        // Remove the user we just added since save failed
+        users.erase(users.end() - 1);
         result["error"] = "Failed to save user";
     }
     
     return result;
 }
 
-
 json UserOperations::listUsers() {
     json result;
     result["success"] = true;
-    result["users"] = users;
+    result["users"] = json::array();
+    
+    // Don't include password hashes in the list
+    for (const auto& user : users) {
+        json userCopy = user;
+        userCopy.erase("passwordHash");
+        result["users"].push_back(userCopy);
+    }
+    
     return result;
 }
 
@@ -271,6 +307,7 @@ json UserOperations::getUser(const std::string& username) {
         if (user["username"] == username) {
             result["success"] = true;
             result["user"] = user;
+            result["user"].erase("passwordHash");  // Don't expose password hash
             return result;
         }
     }
@@ -278,7 +315,6 @@ json UserOperations::getUser(const std::string& username) {
     result["error"] = "User not found";
     return result;
 }
-
 
 json UserOperations::updateUser(const std::string& username, const json& updates) {
     json result;
@@ -293,13 +329,23 @@ json UserOperations::updateUser(const std::string& username, const json& updates
             if (updates.contains("email")) {
                 user["email"] = updates["email"];
             }
+            if (updates.contains("firstName")) {
+                user["firstName"] = updates["firstName"];
+            }
+            if (updates.contains("lastName")) {
+                user["lastName"] = updates["lastName"];
+            }
             if (updates.contains("active")) {
                 user["active"] = updates["active"];
-            }           
+            }
+            if (updates.contains("password")) {
+                user["passwordHash"] = hashPassword(updates["password"].get<std::string>());
+            }
             
             if (saveUsers()) {
                 result["success"] = true;
                 result["user"] = user;
+                result["user"].erase("passwordHash");
             } else {
                 result["error"] = "Failed to save changes";
             }
@@ -338,8 +384,12 @@ json UserOperations::deleteUser(const std::string& username) {
 int UserOperations::listUserDomains(virDomainPtr **domains, 
                                     std::string username, 
                                     int flags) {
+    if (!conn) {
+        std::cerr << "No connection to libvirt" << std::endl;
+        return -1;
+    }
+    
     virDomainPtr* allDomains = nullptr;
-
     int numDomains = 0;
     int numUserDomains = 0;
     
@@ -401,24 +451,20 @@ json UserOperations::getUserUsage(const std::string& username) {
                 unsigned long long totalSize = 0;
 
                 if (virDomainGetInfo(domains[i], &info) == 0) {
-                          
                     vmCount++;
                     totalCPU += info.nrVirtCpu;
                     totalRAM += info.memory / 1024; // Convert to MB
                     
-                    if (virDomainGetBlockInfo(domains[i], "vda", &block_info, 0) == 0) {
-                        totalSize = block_info.capacity;  // Taille virtuelle
-                        // info.allocation - espace réellement utilisé
-                        // info.physical - taille physique sur l'hôte
-                    }else if(virDomainGetBlockInfo(domains[i], "qcow", &block_info, 0) == 0)
-                    {
-                        totalSize = block_info.capacity;  // Taille virtuelle
-                    }else if(virDomainGetBlockInfo(domains[i], "hda", &block_info, 0) == 0)
-                    {
-                        totalSize = block_info.capacity;  // Taille virtuelle
+                    // Try different disk device names
+                    const char* diskNames[] = {"vda", "sda", "hda", "qcow", nullptr};
+                    for (int j = 0; diskNames[j] != nullptr; j++) {
+                        if (virDomainGetBlockInfo(domains[i], diskNames[j], &block_info, 0) == 0) {
+                            totalSize = block_info.capacity;  // Virtual size
+                            break;
+                        }
                     }
-                        
-                    totalStorage += totalSize; 
+                    
+                    totalStorage += totalSize;
                 }
                 virDomainFree(domains[i]);
             }
@@ -437,7 +483,8 @@ json UserOperations::getUserUsage(const std::string& username) {
     saveUsers();
     
     result["success"] = true;
-    result["usage"] = (*userPtr)["usage"];    
+    result["usage"] = (*userPtr)["usage"];
+    
     return result;
 }
 
@@ -454,8 +501,7 @@ json UserOperations::getAllUsersUsage() {
             json userData = {
                 {"username", username},
                 {"role", user["role"]},
-                {"usage", userUsage["usage"]},
-                {"percentages", userUsage["percentages"]}
+                {"usage", userUsage["usage"]}
             };
             result["users"].push_back(userData);
         }
@@ -463,4 +509,3 @@ json UserOperations::getAllUsersUsage() {
     
     return result;
 }
-
