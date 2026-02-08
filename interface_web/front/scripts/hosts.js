@@ -43,6 +43,23 @@ function renderHosts(hosts) {
     });
 }
 
+function renderHostStats(data)
+{
+    const hostsStats = document.getElementById('hosts-stats');
+    if (!hostsStats) return;
+    
+    hostsStats.innerHTML = '';
+    
+    if (hosts.length === 0) {
+        hostsStats.innerHTML = '<p>No hosts configured</p>';
+        return;
+    }
+    
+    hosts.forEach(host => {
+        hostsStats.appendChild(createHostCard(host));
+    });
+}
+
 function createHostCard(host) {
     const card = document.createElement('div');
     card.className = 'host-card';

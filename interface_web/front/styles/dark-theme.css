@@ -1,80 +1,85 @@
-/* Dark Theme Variables */
+/* ==========================================
+   THOTH CLOUD - DARK THEME
+   All dark mode CSS variables and component overrides
+   ========================================== */
+
+/* ==========================================
+   DARK THEME VARIABLES
+   ========================================== */
 .dark-theme {
-    --primary-color: #00c853;
-    --primary-dark: #00b248;
-    --secondary-color: #6c757d;
-    --success-color: #28a745;
-    --danger-color: #dc3545;
-    --warning-color: #ffc107;
-    --info-color: #17a2b8;
-    
-    --bg-primary: #121212;
-    --bg-secondary: #1e1e1e;
-    --bg-tertiary: #2d2d2d;
-    
-    --text-primary: #e0e0e0;
-    --text-secondary: #a0a0a0;
-    --text-tertiary: #808080;
-    
-    --border-color: #404040;
-    --border-light: #333333;
-    
-    --card-bg: #1e1e1e;
-    --card-border: #333333;
-    --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    
-    --sidebar-bg: #1a1a1a;
-    --sidebar-border: #2a2a2a;
-    
-    --hover-bg: #2a2a2a;
-    --active-bg: #333333;
-    
-    --input-bg: #2d2d2d;
-    --input-border: #404040;
-    --input-focus: #00c853;
-    
-    --table-header: #2a2a2a;
-    --table-row: #1e1e1e;
-    --table-hover: #2d2d2d;
-    
-    --modal-bg: #1e1e1e;
-    --modal-border: #333333;
-    --modal-overlay: rgba(0, 0, 0, 0.7);
-    
-    --toast-bg: #2d2d2d;
-    --toast-border: #404040;
-    
-    --progress-bg: #333333;
-    --progress-fill: #00c853;
-    
-    --disabled-bg: #2a2a2a;
-    --disabled-text: #666666;
-    
-    /* Additional variables for consistency */
+    /* Primary Colors */
     --primary: #00c853;
+    --primary-dark: #00b248;
     --primary-light: #00e676;
+    --primary-color: #00c853; /* Legacy support */
+    
+    /* Secondary & Accent */
     --secondary: #0077B6;
     --accent: #FFD700;
+    --secondary-color: #6c757d; /* Legacy support */
     
+    /* Background Colors */
     --bg-main: #121212;
     --bg-card: #1e1e1e;
     --bg-hover: #2a2a2a;
     --bg-dark: #0a0a0a;
+    --bg-primary: #121212; /* Legacy support */
+    --bg-secondary: #1e1e1e; /* Legacy support */
+    --bg-tertiary: #2d2d2d; /* Legacy support */
     
-    --border: #333333;
-    --border-light: #2a2a2a;
+    /* Text Colors */
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --text-tertiary: #808080;
     
+    /* Border Colors */
+    --border: #404040;
+    --border-light: #333333;
+    --border-color: #404040; /* Legacy support */
+    
+    /* Status Colors */
     --success: #2E7D32;
     --warning: #F9A825;
     --danger: #C62828;
     --info: #0288D1;
+    --success-color: #28a745; /* Legacy support */
+    --warning-color: #ffc107; /* Legacy support */
+    --danger-color: #dc3545; /* Legacy support */
+    --info-color: #17a2b8; /* Legacy support */
     
+    /* Shadows */
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); /* Legacy support */
+    
+    /* Component-Specific Variables */
+    --card-bg: #1e1e1e;
+    --card-border: #333333;
+    --sidebar-bg: #1a1a1a;
+    --sidebar-border: #2a2a2a;
+    --hover-bg: #2a2a2a;
+    --active-bg: #333333;
+    --input-bg: #2d2d2d;
+    --input-border: #404040;
+    --input-focus: #00c853;
+    --table-header: #2a2a2a;
+    --table-row: #1e1e1e;
+    --table-hover: #2d2d2d;
+    --modal-bg: #1e1e1e;
+    --modal-border: #333333;
+    --modal-overlay: rgba(0, 0, 0, 0.7);
+    --toast-bg: #2d2d2d;
+    --toast-border: #404040;
+    --progress-bg: #333333;
+    --progress-fill: #00c853;
+    --disabled-bg: #2a2a2a;
+    --disabled-text: #666666;
 }
 
-/* Dark Theme Specific Overrides */
+/* ==========================================
+   GLOBAL OVERRIDES
+   ========================================== */
 .dark-theme body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
@@ -85,6 +90,9 @@
     border-right-color: var(--sidebar-border);
 }
 
+/* ==========================================
+   CARD COMPONENTS
+   ========================================== */
 .dark-theme .card,
 .dark-theme .vm-card,
 .dark-theme .app-card,
@@ -92,12 +100,19 @@
 .dark-theme .stat-card,
 .dark-theme .action-card,
 .dark-theme .billing-card,
-.dark-theme .chart-card {
+.dark-theme .chart-card,
+.dark-theme .network-card,
+.dark-theme .paas-app-card,
+.dark-theme .catalog-card,
+.dark-theme .host-card {
     background-color: var(--card-bg);
     border-color: var(--card-border);
     box-shadow: var(--card-shadow);
 }
 
+/* ==========================================
+   BUTTONS
+   ========================================== */
 .dark-theme .btn {
     transition: all 0.2s ease;
 }
@@ -112,6 +127,9 @@
     background-color: var(--hover-bg);
 }
 
+/* ==========================================
+   INPUTS & FORMS
+   ========================================== */
 .dark-theme input,
 .dark-theme select,
 .dark-theme textarea {
@@ -132,6 +150,15 @@
     box-shadow: 0 0 0 2px rgba(0, 200, 83, 0.25);
 }
 
+.dark-theme .search-input {
+    background-color: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--input-border);
+}
+
+/* ==========================================
+   TABLES
+   ========================================== */
 .dark-theme .data-table {
     background-color: var(--card-bg);
 }
@@ -157,6 +184,9 @@
     border-color: var(--border-color);
 }
 
+/* ==========================================
+   MODALS
+   ========================================== */
 .dark-theme .modal-content,
 .dark-theme .modal {
     background-color: var(--modal-bg);
@@ -167,12 +197,18 @@
     background-color: var(--modal-overlay);
 }
 
+/* ==========================================
+   TOASTS & NOTIFICATIONS
+   ========================================== */
 .dark-theme .toast {
     background-color: var(--toast-bg);
     border-color: var(--toast-border);
     color: var(--text-primary);
 }
 
+/* ==========================================
+   PROGRESS BARS
+   ========================================== */
 .dark-theme .progress-bar {
     background-color: var(--progress-bg);
 }
@@ -181,6 +217,9 @@
     background-color: var(--progress-fill);
 }
 
+/* ==========================================
+   DETAIL PANELS & INFO SECTIONS
+   ========================================== */
 .dark-theme .details-panel {
     background-color: var(--card-bg);
     border-left-color: var(--border-color);
@@ -192,43 +231,15 @@
     border-color: var(--border-color);
 }
 
-.dark-theme .form-section {
-    background-color: var(--bg-secondary);
-    border-color: var(--border-color);
-}
-
-.dark-theme .flavor-card .flavor-content {
-    background-color: var(--bg-tertiary);
-    border-color: var(--border-color);
-}
-
-.dark-theme .flavor-card input:checked ~ .flavor-content {
-    border-color: var(--primary-color);
-    background-color: rgba(0, 200, 83, 0.1);
-}
-
-.dark-theme .code,
-.dark-theme code {
-    background-color: var(--bg-tertiary) !important;
-    border-color: var(--border-color);
-    color: var(--text-primary) !important;
-}
-
-.dark-theme .system-info-text {
-    background-color: var(--bg-tertiary);
-    color: var(--text-secondary);
-}
-
-.dark-theme .auth-page {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-}
-
-.dark-theme .auth-card {
+.dark-theme .form-section,
+.dark-theme .deployment-progress {
     background-color: var(--card-bg);
     border-color: var(--border-color);
 }
 
-/* Fix for white backgrounds */
+/* ==========================================
+   PAGE STRUCTURE
+   ========================================== */
 .dark-theme .page-header,
 .dark-theme .filters-bar,
 .dark-theme .content-section,
@@ -242,14 +253,31 @@
     border-color: var(--border-color);
 }
 
-/* Fix search input */
-.dark-theme .search-input {
-    background-color: var(--input-bg) !important;
-    color: var(--text-primary) !important;
-    border-color: var(--input-border);
+/* ==========================================
+   FLAVOR/OPTION CARDS
+   ========================================== */
+.dark-theme .flavor-card .flavor-content,
+.dark-theme .radio-option span {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-color);
+    color: var(--text-primary);
 }
 
-/* Fix chips/filters */
+.dark-theme .flavor-card input:checked ~ .flavor-content,
+.dark-theme .radio-option input:checked ~ span {
+    border-color: var(--primary-color);
+    background-color: rgba(0, 200, 83, 0.2) !important;
+    color: var(--primary);
+}
+
+.dark-theme .radio-option:hover span,
+.dark-theme .flavor-card:hover .flavor-content {
+    background-color: var(--hover-bg);
+}
+
+/* ==========================================
+   CHIPS & FILTERS
+   ========================================== */
 .dark-theme .chip {
     background-color: var(--bg-tertiary);
     border-color: var(--border-color);
@@ -266,23 +294,9 @@
     border-color: var(--primary);
 }
 
-/* Fix flavor cards */
-.dark-theme .radio-option span {
-    background-color: var(--bg-tertiary) !important;
-    border-color: var(--border-color);
-    color: var(--text-primary);
-}
-
-.dark-theme .radio-option:hover span {
-    background-color: var(--hover-bg);
-}
-
-.dark-theme .radio-option input:checked ~ span {
-    background-color: rgba(0, 200, 83, 0.2);
-    color: var(--primary);
-}
-
-/* Fix labels */
+/* ==========================================
+   TEXT & HEADINGS
+   ========================================== */
 .dark-theme label,
 .dark-theme .form-section-title,
 .dark-theme .section-title,
@@ -291,21 +305,50 @@
     color: var(--text-primary) !important;
 }
 
-/* Fix small text */
 .dark-theme small,
 .dark-theme .page-subtitle,
 .dark-theme .stat-label,
 .dark-theme .vm-card-meta,
-.dark-theme .app-card-description {
+.dark-theme .app-card-description,
+.dark-theme .info-item strong,
+.dark-theme .network-info-banner span {
     color: var(--text-secondary) !important;
 }
 
-/* Fix deployment progress */
-.dark-theme .deployment-progress {
+/* ==========================================
+   CODE BLOCKS
+   ========================================== */
+.dark-theme .code,
+.dark-theme code {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-color);
+    color: var(--text-primary) !important;
+}
+
+.dark-theme .system-info-text {
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.dark-theme .result-details {
+    background-color: var(--bg-tertiary) !important;
+}
+
+/* ==========================================
+   AUTH PAGES
+   ========================================== */
+.dark-theme .auth-page {
+    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+}
+
+.dark-theme .auth-card {
     background-color: var(--card-bg);
     border-color: var(--border-color);
 }
 
+/* ==========================================
+   DEPLOYMENT PROGRESS
+   ========================================== */
 .dark-theme .progress-step {
     background-color: var(--bg-tertiary);
 }
@@ -320,11 +363,9 @@
     color: var(--text-secondary);
 }
 
-.dark-theme .result-details {
-    background-color: var(--bg-tertiary) !important;
-}
-
-/* Fix VNC/Console info */
+/* ==========================================
+   VNC/CONSOLE INFO
+   ========================================== */
 .dark-theme .console-details,
 .dark-theme .console-info {
     background-color: var(--bg-tertiary);
@@ -334,7 +375,9 @@
     color: var(--text-primary);
 }
 
-/* Fix snapshot items */
+/* ==========================================
+   SNAPSHOTS
+   ========================================== */
 .dark-theme .snapshot-item {
     background-color: var(--bg-tertiary);
 }
@@ -344,18 +387,141 @@
     color: var(--text-primary);
 }
 
-/* Fix app category badges */
-.dark-theme .app-category-badge {
+/* ==========================================
+   APP CATEGORY BADGES
+   ========================================== */
+.dark-theme .app-category-badge,
+.dark-theme .catalog-category-badge {
     background-color: var(--bg-tertiary);
     color: var(--text-secondary);
 }
 
-/* Chart.js Dark Theme */
+/* ==========================================
+   STAT CARDS
+   ========================================== */
+.dark-theme .stat-icon {
+    color: var(--text-primary);
+}
+
+.dark-theme .stat-value {
+    color: var(--text-primary) !important;
+}
+
+.dark-theme .action-card h4,
+.dark-theme .action-card p {
+    color: var(--text-primary);
+}
+
+/* ==========================================
+   QUOTAS & INFO ITEMS
+   ========================================== */
+.dark-theme .quota-item {
+    color: var(--text-primary);
+}
+
+.dark-theme .quota-item span {
+    color: var(--text-secondary);
+}
+
+.dark-theme .quota-item strong {
+    color: var(--text-primary);
+}
+
+.dark-theme .cluster-header h3,
+.dark-theme .info-item {
+    color: var(--text-primary);
+}
+
+/* ==========================================
+   PAAS APP SPECIFIC
+   ========================================== */
+.dark-theme .paas-app-card {
+    background: var(--card-bg);
+}
+
+.dark-theme .app-info-item code {
+    background: var(--bg-tertiary);
+    color: var(--primary);
+}
+
+.dark-theme .metric-card {
+    background: var(--card-bg);
+    border-color: var(--border);
+}
+
+.dark-theme .field-with-copy input {
+    background: var(--input-bg);
+    border-color: var(--border);
+    color: var(--text-primary);
+}
+
+/* ==========================================
+   NETWORK CARDS
+   ========================================== */
+.dark-theme .network-section,
+.dark-theme .network-card {
+    background-color: var(--card-bg);
+    border-color: var(--border);
+}
+
+.dark-theme .network-card:hover {
+    background-color: var(--hover-bg);
+    border-color: var(--primary);
+}
+
+.dark-theme .network-info-banner {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border);
+}
+
+.dark-theme .network-card-header h4,
+.dark-theme .section-header h3,
+.dark-theme .network-info-item span {
+    color: var(--text-primary);
+}
+
+.dark-theme .network-info-item strong,
+.dark-theme .network-info-banner span {
+    color: var(--text-secondary);
+}
+
+.dark-theme .network-info-item code {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border);
+    color: var(--text-primary);
+}
+
+.dark-theme .network-info-item code.network-id {
+    color: var(--text-tertiary);
+}
+
+/* ==========================================
+   EMPTY & LOADING STATES
+   ========================================== */
+.dark-theme .empty-state,
+.dark-theme .loading-text {
+    color: var(--text-tertiary);
+}
+
+.dark-theme .error-text {
+    color: var(--danger);
+}
+
+.dark-theme .empty-state-large {
+    background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+    color: var(--text-secondary);
+}
+
+/* ==========================================
+   CHART.JS DARK THEME
+   ========================================== */
 .dark-theme .chartjs-render-monitor {
     filter: brightness(0.8) contrast(1.2);
 }
 
-/* Scrollbar Styling for Dark Theme */
+/* ==========================================
+   SCROLLBAR STYLING
+   ========================================== */
 .dark-theme ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -374,59 +540,10 @@
     background: var(--text-secondary);
 }
 
-/* Fix stat card icons */
-.dark-theme .stat-icon {
-    color: var(--text-primary);
-}
-
-.dark-theme .stat-value {
-    color: var(--text-primary) !important;
-}
-
-/* Fix action cards */
-.dark-theme .action-card h4,
-.dark-theme .action-card p {
-    color: var(--text-primary);
-}
-
-/* Fix info banners */
-.dark-theme .info-banner {
-    background-color: rgba(2, 136, 209, 0.1);
-}
-
-.dark-theme .info-banner h4,
-.dark-theme .info-banner p {
-    color: var(--text-primary);
-}
-
-/* Fix quota items */
-.dark-theme .quota-item {
-    color: var(--text-primary);
-}
-
-.dark-theme .quota-item span {
-    color: var(--text-secondary);
-}
-
-.dark-theme .quota-item strong {
-    color: var(--text-primary);
-}
-
-/* Fix cluster info */
-.dark-theme .cluster-header h3 {
-    color: var(--text-primary);
-}
-
-.dark-theme .info-item {
-    color: var(--text-primary);
-}
-
-/* Disable transitions on theme variables only */
+/* ==========================================
+   DISABLE TRANSITIONS ON THEME VARIABLES
+   This prevents jarring animations when switching themes
+   ========================================== */
 .dark-theme * {
     transition-property: transform, opacity, box-shadow !important;
-}
-
-/* Force text color for loading states */
-.dark-theme .loading-text {
-    color: var(--text-tertiary) !important;
 }

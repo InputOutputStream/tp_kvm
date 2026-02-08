@@ -16,7 +16,11 @@ fi
 # Install dependencies
 echo "[1/5] Installing dependencies..."
 apt-get update -qq
-apt-get install -y git python3 python3-pip python3-numpy websockify
+apt-get install -y git python3 python3-pip python3-numpy websockify nginx certbot python3-certbot-nginx iptables-persistent
+# Install Nginx (for reverse proxy)
+# Install Certbot (for SSL)
+# Install iptables-persistent (to save rules)
+
 
 # Clone noVNC
 echo "[2/5] Cloning noVNC..."

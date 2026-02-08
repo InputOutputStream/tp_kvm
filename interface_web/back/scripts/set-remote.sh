@@ -271,11 +271,13 @@ main() {
     setup_kvm_packages
     setup_directories
     setup_kvm_user
+    install_docker
     configure_libvirt
     create_config_files
     setup_firewall_rules
     create_test_script
     create_connection_info
+    check_docker
     verify_installation
     show_summary
     

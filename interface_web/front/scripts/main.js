@@ -265,25 +265,6 @@ async function loadHostStats() {
 }
 
 
-// ==========================================
-// Docker Swarm Management
-// ==========================================
-
-function showCreateSwarmModal() {
-    showToast('Create Swarm feature - UI ready, backend needed', 'info');
-}
-
-async function deploySwarmCluster() {
-    const managerNodes = document.querySelector('input[placeholder="1, 3, 5..."]').value;
-    const workerNodes = document.querySelector('input[placeholder="2"]').value;
-    
-    showToast(`Creating cluster: ${managerNodes} managers, ${workerNodes} workers...`, 'info');
-    
-    // Simulate cluster creation
-    setTimeout(() => {
-        showToast('✅ Swarm cluster created successfully!', 'success');
-    }, 3000);
-}
 
 // ==========================================
 // Users & Quotas Management
@@ -647,6 +628,21 @@ async function loadSystemInfo() {
 document.addEventListener('DOMContentLoaded', () => {
     if (window.authService?.isAuthenticated()) {
         initializeRoleBasedUI();
+        
+        // Initialize network dropdown for deploy view
+        const deployNavItem = document.querySelector('[data-view="deploy"]');
+        if (deployNavItem) {
+            deployNavItem.addEventListener('click', () => {
+                // Load user networks when deploy view is opened
+                setTimeout(() => {
+                    if (window.NetworkService?.loadMyNetworks) {
+                        window.NetworkService.loadMyNetworks().catch(error => {
+                            console.error('Failed to load networks:', error);
+                        });
+                    }
+                }, 100);
+            });
+        }
     }
 });
 

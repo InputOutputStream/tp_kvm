@@ -76,152 +76,7 @@ function updateProgressStep(stepNum, status) {
     }
 }
 
-// Deploy VM
-async function deployVM(event) {
-    event.preventDefault();
-    
-    const selectedFlavor = document.querySelector('input[name="flavor"]:checked');
-    if (!selectedFlavor) {
-        showToast('Please select a flavor', 'error');
-        return;
-    }
-    
-    const flavorType = selectedFlavor.value;
-    const flavorConfig = getFlavorConfig(flavorType);
-    
-    const deployData = {
-        hostname: document.getElementById('vm-hostname').value,  // User's chosen name
-        memory: flavorConfig.memory,
-        vcpus: flavorConfig.vcpus,
-        disk: flavorConfig.disk,
-        network: document.getElementById('vm-network').value,
-        username: document.getElementById('vm-username').value,
-        authMethod: document.querySelector('input[name="auth-method"]:checked').value,
-        password: document.getElementById('vm-password').value,
-        sshKey: document.getElementById('vm-ssh-key').value,
-        flavor: flavorType
-    };
-    
-    document.getElementById('deploy-form').style.display = 'none';
-    document.getElementById('deployment-progress').style.display = 'block';
-    
-    try {
-        updateProgressStep(1, 'loading');
-        
-        const result = await fetchAPI('/vms/deploy', {
-            method: 'POST',
-            body: JSON.stringify(deployData)
-        });
-        
-        updateProgressStep(1, 'success');
-        updateProgressStep(2, 'success');
-        updateProgressStep(3, 'success');
-        
-        // Wait for cloud-init
-        updateProgressStep(4, 'loading');
-        await new Promise(resolve => setTimeout(resolve, 60000));
-        updateProgressStep(4, 'success');
-        
-        // Get IP - use internal VM name from result
-        updateProgressStep(5, 'loading');
-        const internalName = result.vmName;
-        const ipResult = await waitForVMIP(internalName, 30);
-        updateProgressStep(5, 'success');
-        
-        // Show result with display name and VM details
-        const displayName = result.displayName || deployData.hostname;
-        document.getElementById('result-hostname').textContent = displayName;
-        document.getElementById('result-ip').textContent = ipResult.primaryIP || 'IP not available';
-        document.getElementById('result-username').textContent = deployData.username;
-        document.getElementById('ssh-command').textContent = `ssh ${deployData.username}@${ipResult.primaryIP}`;
-        
-        // Show VM information panel
-        const vmInfoPanel = document.getElementById('vm-info-panel');
-        if (vmInfoPanel && ipResult.primaryIP) {
-            vmInfoPanel.innerHTML = `
-                <h4>📊 VM Information</h4>
-                <div class="vm-info-grid">
-                    <div class="vm-info-item">
-                        <strong>Hostname</strong>
-                        <span>${displayName}</span>
-                    </div>
-                    <div class="vm-info-item">
-                        <strong>IP Address</strong>
-                        <code>${ipResult.primaryIP}</code>
-                    </div>
-                    <div class="vm-info-item">
-                        <strong>Internal Name</strong>
-                        <code>${internalName}</code>
-                    </div>
-                    <div class="vm-info-item">
-                        <strong>Network</strong>
-                        <span>${deployData.network}</span>
-                    </div>
-                    <div class="vm-info-item">
-                        <strong>Flavor</strong>
-                        <span>${flavorType || deployData.flavor}</span>
-                    </div>
-                    <div class="vm-info-item">
-                        <strong>Resources</strong>
-                        <span>${flavorConfig.vcpus} vCPU • ${Math.floor(flavorConfig.memory / 1024)} GB RAM</span>
-                    </div>
-                </div>
-            `;
-            vmInfoPanel.style.display = 'block';
-        }
-        
-        document.getElementById('deployment-result').style.display = 'block';
-        
-        showToast('✅ VM deployed successfully!', 'success');
-        await loadVMs();
-        
-    } catch (error) {
-        showToast(`❌ Deployment error: ${error.message}`, 'error');
-        
-        // Show quota error details if available
-        if (error.message.includes('quota exceeded')) {
-            showToast('💡 Contact admin to increase your quota', 'info');
-        }
-        
-        setTimeout(() => {
-            document.getElementById('deploy-form').style.display = 'block';
-            document.getElementById('deployment-progress').style.display = 'none';
-            document.getElementById('deployment-result').style.display = 'none';
-            
-            for (let i = 1; i <= 5; i++) {
-                const step = document.getElementById(`step-${i}`);
-                step.className = 'progress-step';
-                step.querySelector('.step-icon').textContent = '⏳';
-            }
-        }, 3000);
-    }
-}
 
-// Get Flavor Configuration
-function getFlavorConfig(flavorType) {
-    const flavors = {
-        small: {
-            memory: 1024,  // 2GB
-            vcpus: 1,
-            disk: 10,
-            price: 2000
-        },
-        medium: {
-            memory: 2048,  // 4GB
-            vcpus: 1,
-            disk: 10,
-            price: 3500
-        },
-        large: {
-            memory: 3072,  // 8GB
-            vcpus: 1,
-            disk: 10,
-            price: 6500
-        }
-    };
-    
-    return flavors[flavorType] || flavors.medium;
-}
 
 function renderFlavorCards(flavors) {
     const flavorContainer = document.querySelector('.flavor-cards');
@@ -292,7 +147,7 @@ async function deployVMEnhanced(event) {
         return;
     }
     
-    const baseImageId = document.getElementById('vm-base-image')?.value || 'ubuntu-22.04-server-cloudimg-amd64';
+    const baseImageId = document.getElementById('vm-base-image')?.value;
     
     const deployData = {
         hostname: document.getElementById('vm-hostname').value,
@@ -325,7 +180,7 @@ async function deployVMEnhanced(event) {
         
         // Wait for cloud-init
         updateProgressStep(4, 'loading');
-        await new Promise(resolve => setTimeout(resolve, 60000));
+        // await new Promise(resolve => setTimeout(resolve, 60000));
         updateProgressStep(4, 'success');
         
         // Get IP
@@ -461,5 +316,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.initDeployForm = initDeployForm;
 window.deployVMEnhanced = deployVMEnhanced;
-
 window.deployVM = deployVMEnhanced;

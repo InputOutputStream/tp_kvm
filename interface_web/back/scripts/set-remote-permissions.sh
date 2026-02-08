@@ -89,39 +89,6 @@ else
     log_warn "Cloud image already exists"
 fi
 
-# Create .env file
-log_info "Creating configuration file..."
-cat > /var/lib/thoth-cloud/.env << 'EOF'
-API_PORT=3000
-HOSTS=qemu:///system
-EOF
-chmod 644 /var/lib/thoth-cloud/.env
-
-# Create users.json
-cat > /var/lib/thoth-cloud/users.json << 'EOF'
-[]
-EOF
-chmod 644 /var/lib/thoth-cloud/users.json
-
-# Create hosts.json
-cat > /var/lib/thoth-cloud/hosts.json << 'EOF'
-{
-  "hosts": [
-    {
-      "id": "localhost",
-      "uri": "qemu:///system",
-      "hostname": "localhost"
-    }
-  ]
-}
-EOF
-chmod 644 /var/lib/thoth-cloud/hosts.json
-
-# Set proper ownership for THOTH CLOUD files
-chown -R root:root /var/lib/thoth-cloud
-find /var/lib/thoth-cloud -type f -exec chmod 644 {} \;
-find /var/lib/thoth-cloud -type d -exec chmod 755 {} \;
-
 # Configure firewall
 if command -v ufw &> /dev/null; then
     log_info "Configuring firewall..."

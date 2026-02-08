@@ -2,7 +2,7 @@
 
 # Configuration
 TARGET_DIR="/var/lib/thoth-cloud"
-USER="thot"
+USER="vps"
 
 # Colors for output
 RED='\033[0;31m'

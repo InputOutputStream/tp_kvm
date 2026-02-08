@@ -1,0 +1,871 @@
+/* ==========================================
+   FRONTEND COMPONENTS STYLESHEET
+   Styles for new user management, VNC, billing, and VM modules
+   ========================================== */
+
+/* ==========================================
+   USER MANAGEMENT STYLES
+   ========================================== */
+
+.users-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.user-card {
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.user-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.user-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+}
+
+.user-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--primary-color, #00843d);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 1.2em;
+}
+
+.user-info h3 {
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.user-email {
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.9em;
+    margin: 4px 0 0 0;
+}
+
+.user-badges {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.role-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.role-admin {
+    background: rgba(220, 38, 38, 0.1);
+    color: #dc2626;
+}
+
+.role-user {
+    background: rgba(0, 132, 61, 0.1);
+    color: #00843d;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.status-active {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.status-inactive {
+    background: rgba(156, 163, 175, 0.1);
+    color: #6b7280;
+}
+
+.status-warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.user-card-body {
+    margin-bottom: 15px;
+}
+
+.user-stats h4 {
+    margin: 0 0 15px 0;
+    font-size: 0.95em;
+}
+
+.stat-item {
+    margin-bottom: 15px;
+}
+
+.stat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 0.9em;
+}
+
+.progress-bar {
+    height: 6px;
+    background: var(--bg-color, #f8f9fa);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--primary-color, #00843d);
+    transition: width 0.3s ease;
+}
+
+.user-metadata {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.metadata-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+}
+
+.metadata-item strong {
+    color: var(--text-secondary, #6b7280);
+}
+
+.user-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* Filter Tabs */
+.filter-tabs {
+    display: flex;
+    gap: 10px;
+    margin: 20px 0;
+    border-bottom: 2px solid var(--border-color, #e5e7eb);
+}
+
+.filter-tab {
+    padding: 10px 20px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-secondary, #6b7280);
+    transition: all 0.2s;
+}
+
+.filter-tab:hover {
+    color: var(--primary-color, #00843d);
+}
+
+.filter-tab.active {
+    color: var(--primary-color, #00843d);
+    border-bottom-color: var(--primary-color, #00843d);
+}
+
+/* ==========================================
+   VNC CONSOLE STYLES
+   ========================================== */
+
+.modal-vnc {
+    max-width: 90vw;
+    max-height: 90vh;
+}
+
+.modal-vnc .modal {
+    max-width: none;
+    width: 90vw;
+}
+
+.vnc-body {
+    padding: 0 !important;
+}
+
+.vnc-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: var(--card-bg, #ffffff);
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.vnc-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9em;
+}
+
+.vnc-status-indicator {
+    font-size: 1.2em;
+    line-height: 1;
+}
+
+.vnc-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.vnc-container {
+    width: 100%;
+    height: 600px;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+#vnc-screen {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#vnc-canvas {
+    max-width: 100%;
+    max-height: 100%;
+    image-rendering: auto;
+}
+
+.vnc-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+}
+
+.vnc-connection-info {
+    background: var(--card-bg, #ffffff);
+    padding: 30px;
+    border-radius: 8px;
+    max-width: 600px;
+    color: var(--text-color, #1f2937);
+}
+
+.vnc-connection-info h4 {
+    margin-top: 0;
+}
+
+.connection-details {
+    margin: 20px 0;
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.detail-item:last-child {
+    border-bottom: none;
+}
+
+.vnc-client-options {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.vnc-client-options h5 {
+    margin-bottom: 10px;
+}
+
+.vnc-client-options ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+.vnc-info-panel {
+    padding: 20px;
+    background: var(--bg-color, #f8f9fa);
+}
+
+/* ==========================================
+   BILLING DASHBOARD STYLES
+   ========================================== */
+
+.billing-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--border-color, #e5e7eb);
+}
+
+.billing-period h2 {
+    margin: 0;
+}
+
+.billing-month {
+    color: var(--text-secondary, #6b7280);
+    margin-top: 5px;
+}
+
+.billing-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.billing-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.summary-card {
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    gap: 15px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.summary-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.summary-icon {
+    font-size: 2.5em;
+    line-height: 1;
+}
+
+.summary-content {
+    flex: 1;
+}
+
+.summary-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 0.9em;
+    color: var(--text-secondary, #6b7280);
+    font-weight: 500;
+}
+
+.summary-value {
+    font-size: 1.8em;
+    font-weight: 700;
+    margin: 0 0 5px 0;
+    color: var(--primary-color, #00843d);
+}
+
+.summary-change {
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.85em;
+}
+
+.billing-details {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.billing-section {
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.billing-section h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+.revenue-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.revenue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: var(--bg-color, #f8f9fa);
+    border-radius: 8px;
+}
+
+.revenue-category {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.category-icon {
+    font-size: 1.5em;
+}
+
+.category-name {
+    font-weight: 500;
+}
+
+.revenue-amount {
+    font-weight: 600;
+    color: var(--primary-color, #00843d);
+}
+
+.usage-trends {
+    height: 300px;
+    position: relative;
+}
+
+.billing-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.billing-table thead {
+    background: var(--bg-color, #f8f9fa);
+}
+
+.billing-table th,
+.billing-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.billing-table th {
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.9em;
+}
+
+.billing-table tbody tr:hover {
+    background: var(--bg-color, #f8f9fa);
+}
+
+.user-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.user-avatar-small {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary-color, #00843d);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+/* ==========================================
+   VM DELETION STYLES
+   ========================================== */
+
+.warning-banner.danger {
+    background: rgba(220, 38, 38, 0.1);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    gap: 12px;
+}
+
+.warning-icon {
+    font-size: 1.5em;
+}
+
+.vm-name-highlight {
+    font-size: 1.2em;
+    font-weight: 700;
+    color: var(--danger-color, #dc2626);
+    margin: 10px 0;
+    padding: 10px;
+    background: rgba(220, 38, 38, 0.05);
+    border-radius: 6px;
+    text-align: center;
+}
+
+.deletion-options h4 {
+    margin-bottom: 15px;
+    font-size: 1em;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-color, #f8f9fa);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-bottom: 8px;
+}
+
+.checkbox-label:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin-top: 2px;
+    cursor: pointer;
+}
+
+.checkbox-label span {
+    flex: 1;
+}
+
+.checkbox-label small {
+    display: block;
+    color: var(--text-secondary, #6b7280);
+    margin-top: 4px;
+}
+
+.confirmation-input {
+    margin-top: 20px;
+}
+
+.confirmation-input label {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.confirmation-field {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+    font-size: 1em;
+    margin-top: 8px;
+    transition: border-color 0.2s;
+}
+
+.confirmation-field:focus {
+    outline: none;
+    border-color: var(--danger-color, #dc2626);
+}
+
+.error-shake {
+    animation: shake 0.3s;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-10px); }
+    75% { transform: translateX(10px); }
+}
+
+.deletion-steps {
+    margin: 20px 0;
+}
+
+.deletion-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background: var(--bg-color, #f8f9fa);
+    transition: all 0.3s;
+}
+
+.deletion-step.active {
+    background: rgba(0, 132, 61, 0.1);
+    border-left: 3px solid var(--primary-color, #00843d);
+}
+
+.deletion-step.complete {
+    background: rgba(0, 132, 61, 0.05);
+}
+
+.deletion-step.error {
+    background: rgba(220, 38, 38, 0.1);
+    border-left: 3px solid var(--danger-color, #dc2626);
+}
+
+.deletion-step .step-icon {
+    font-size: 1.3em;
+    min-width: 24px;
+}
+
+.deletion-step .step-text {
+    flex: 1;
+}
+
+.progress-bar-container {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.progress-text {
+    font-weight: 600;
+    min-width: 50px;
+    text-align: right;
+}
+
+/* ==========================================
+   COMMON MODAL STYLES
+   ========================================== */
+
+.modal-large {
+    max-width: 900px !important;
+}
+
+.info-banner {
+    background: rgba(0, 132, 61, 0.1);
+    border: 1px solid rgba(0, 132, 61, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    gap: 12px;
+}
+
+.info-icon {
+    font-size: 1.3em;
+}
+
+.success-content {
+    text-align: center;
+    padding: 20px;
+}
+
+.success-icon {
+    font-size: 4em;
+    margin-bottom: 20px;
+}
+
+.clone-details {
+    margin: 30px 0;
+    text-align: left;
+}
+
+/* ==========================================
+   FORM STYLES
+   ========================================== */
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 6px;
+    font-size: 0.95em;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-color, #00843d);
+}
+
+.form-group small {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.85em;
+}
+
+/* ==========================================
+   RESPONSIVE DESIGN
+   ========================================== */
+
+@media (max-width: 1024px) {
+    .billing-details {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .users-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .billing-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .billing-summary {
+        grid-template-columns: 1fr;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .vnc-container {
+        height: 400px;
+    }
+    
+    .modal-vnc .modal {
+        width: 95vw;
+    }
+}
+
+/* ==========================================
+   UTILITY CLASSES
+   ========================================== */
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.loading-text {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.error-text {
+    text-align: center;
+    padding: 40px;
+    color: var(--danger-color, #dc2626);
+}
+
+code {
+    background: var(--bg-color, #f8f9fa);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+/* ==========================================
+   BUTTON STYLES
+   ========================================== */
+
+.btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn-primary {
+    background: var(--primary-color, #00843d);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #006d32;
+}
+
+.btn-secondary {
+    background: var(--bg-color, #f8f9fa);
+    color: var(--text-color, #1f2937);
+    border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.btn-secondary:hover {
+    background: #e5e7eb;
+}
+
+.btn-danger {
+    background: var(--danger-color, #dc2626);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #b91c1c;
+}
+
+.btn-warning {
+    background: var(--warning-color, #f59e0b);
+    color: white;
+}
+
+.btn-warning:hover {
+    background: #d97706;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.9em;
+}
+
+.btn-lg {
+    padding: 14px 24px;
+    font-size: 1.1em;
+}

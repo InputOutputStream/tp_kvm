@@ -285,7 +285,6 @@ json SwarmOperations::listServices(const std::string& clusterId) {
     return result;
 }
 
-
 json SwarmOperations::selectSwarmHost(const std::string& role, const json& nodeConfig) {
     json result;
     result["success"] = false;
@@ -296,9 +295,9 @@ json SwarmOperations::selectSwarmHost(const std::string& role, const json& nodeC
     }
     
     // Swarm node resource requirements
-    int memory = 2048;  // 2GB for Swarm nodes
-    int cpu = 2;        // 2 vCPUs
-    long long disk = 10LL * 1024 * 1024 * 1024;  // 10GB
+    int memory = 1024;  // 1GB for Swarm nodes 
+    int cpu = 1;        // 1 vCPUs
+    long long disk = 5LL * 1024 * 1024 * 1024;  // 5GB
     
     // Managers need slightly more resources
     if (role == "manager") {
@@ -306,22 +305,46 @@ json SwarmOperations::selectSwarmHost(const std::string& role, const json& nodeC
         cpu = 2;
     }
     
-    // Check resource availability
+    std::cout << "\n=== Selecting Host for Swarm " << role << " ===" << std::endl;
+    std::cout << "Required resources: " << memory << "MB RAM, " << cpu << " vCPUs, " 
+              << (disk / (1024*1024*1024)) << "GB disk" << std::endl;
+    
+    // Check resource availability first
     json availability = hostManager->checkResourceAvailability(memory, cpu, disk);
     
     if (!availability["available"].get<bool>()) {
         result["error"] = "No suitable host found for Swarm " + role;
         result["details"] = availability;
+        
+        std::cout << "❌ No hosts with sufficient resources available!" << std::endl;
+        std::cout << "Available hosts status:" << std::endl;
+        for (const auto& host : availability["hosts"]) {
+            std::cout << "  - " << host["hostname"].get<std::string>() 
+                      << ": canAccommodate=" << host["canAccommodate"].get<bool>()
+                      << ", availableMemory=" << host["availableMemory"].get<int>() << "MB"
+                      << ", availableCPUs=" << host["availableCPUs"].get<int>()
+                      << ", availableDisk=" << host["availableDisk"].get<long long>() << "GB"
+                      << std::endl;
+        }
+        
         return result;
     }
     
     // Use BEST_FIT strategy for Swarm nodes (to minimize waste)
-    std::string selectedHost = hostManager->findBestHost(memory, cpu, disk);
+    std::string selectedHost = hostManager->findBestHost(
+        memory, 
+        cpu, 
+        disk, 
+        HostSelectionStrategy::LEAST_USED
+    );
     
     if (selectedHost.empty()) {
         result["error"] = "Could not select optimal host for " + role;
+        std::cout << "❌ findBestHost returned empty string!" << std::endl;
         return result;
     }
+    
+    std::cout << "✅ Selected host: " << selectedHost << std::endl;
     
     result["success"] = true;
     result["host"] = selectedHost;
@@ -339,11 +362,6 @@ json SwarmOperations::createSwarmClusterWithHosts(const std::string& clusterName
                                                  int numManagers, int numWorkers) {
     json result;
     result["success"] = false;
-    
-    if (!hostManager) {
-        // Fallback to original method
-        return createSwarmCluster(clusterName, owner, numManagers, numWorkers);
-    }
     
     std::cout << "\n========================================" << std::endl;
     std::cout << "Creating Docker Swarm Cluster with Host Selection" << std::endl;
@@ -423,6 +441,9 @@ json SwarmOperations::createSwarmClusterWithHosts(const std::string& clusterName
         std::cout << "  Deploying " << nodeName << " on " << managerHosts[i] << "..." << std::endl;
         
         // Get connection for this host
+        std::cout << "----------------------------------" << std::endl;
+        std::cout << "Manager Hosts: " << managerHosts[0] << std::endl;
+
         virConnectPtr hostConn = hostManager->getConnection(managerHosts[i]);
         if (!hostConn) {
             result["error"] = "Failed to connect to host: " + managerHosts[i];
@@ -433,18 +454,18 @@ json SwarmOperations::createSwarmClusterWithHosts(const std::string& clusterName
         json vmConfig = {
             {"hostname", nodeName},
             {"vcpus", 2},
-            {"memory", 4096},
-            {"disk", 20},
-            {"username", "centos"},
+            {"memory", 2048},
+            {"disk", 10},
+            {"username", "debian12"},
             {"authMethod", "password"},
             {"password", "swarm123"},
             {"owner", owner},
+            {"baseImage", "debian-12-genericcloud-amd64"},
             {"network", networkName},
             {"targetHost", managerHosts[i]}  // Specify target host
         };
         
         // Need to update VMOperations to support deployment to specific hosts
-        // This would require modifying VMOperations to use hostManager
         bool deployed = vmOps->deployVM(vmConfig);
         if (!deployed) {
             result["error"] = "Failed to deploy manager node: " + nodeName;
@@ -473,13 +494,14 @@ json SwarmOperations::createSwarmClusterWithHosts(const std::string& clusterName
         // Deploy VM on specific host
         json vmConfig = {
             {"hostname", nodeName},
-            {"vcpus", 2},
-            {"memory", 4096},
-            {"disk", 20},
-            {"username", "centos"},
+            {"vcpus", 1},
+            {"memory", 2096},
+            {"disk", 10},
+            {"username", "debian12"},
             {"authMethod", "password"},
             {"password", "swarm123"},
             {"owner", owner},
+            {"baseImage", "debian-12-genericcloud-amd64"},
             {"network", networkName},
             {"targetHost", managerHosts[i]}  // Specify target host
         };

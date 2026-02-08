@@ -2,6 +2,44 @@
 // NETWORK MANAGEMENT
 // ==========================================
 
+const NetworkService = {
+    async createNetwork(name) {
+        const user = authService.currentUser.username;
+        return await window.fetchAPI('/networks/user', {
+            method: 'POST',
+            body: JSON.stringify({ username: user, networkName: name })
+        });
+    },
+
+    async loadMyNetworks() {
+        const data = await window.fetchAPI('/networks/mine');
+        const select = document.getElementById('vm-network');
+        const optgroup = document.getElementById('user-networks-group');
+        
+        if (select && optgroup && data.networks) {
+            // Clear existing user network options
+            optgroup.innerHTML = '';
+            
+            if (data.networks.length === 0) {
+                // Add a disabled option if no networks exist
+                const opt = document.createElement('option');
+                opt.disabled = true;
+                opt.textContent = 'No networks created yet';
+                optgroup.appendChild(opt);
+            } else {
+                // Add each user network
+                data.networks.forEach(net => {
+                    const opt = document.createElement('option');
+                    opt.value = net.networkName;
+                    opt.textContent = `${net.displayName || net.networkName} (${net.subnet}/24)`;
+                    optgroup.appendChild(opt);
+                });
+            }
+        }
+        return data;
+    }
+};
+
 async function loadNetworks() {
     const networksList = document.getElementById('networks-list');
     if (!networksList) return;
@@ -262,6 +300,7 @@ async function getNetworkInfo(networkId) {
 }
 
 // Export functions
+window.NetworkService = NetworkService;
 window.loadUserNetworks = loadUserNetworks;
 window.loadNetworks = loadNetworks;
 window.createUserNetwork = createUserNetwork;

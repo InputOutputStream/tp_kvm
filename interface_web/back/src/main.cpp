@@ -13,6 +13,7 @@
 #include "../include/flavor_manager.hpp"
 #include "../include/network_manager.hpp"
 #include "../include/baseimage_manager.hpp"
+#include "../include/vnc_handler.hpp"
 
 using namespace httplib;
 
@@ -60,10 +61,11 @@ int main() {
     FlavorManager flavorMgr;  
     PaaSOperations paasOps(primaryConn, &remoteExec, &hostManager);
     SwarmOperations swarmOps(primaryConn, &vmOps, &networkMgr, &remoteExec, &hostManager);
-
+    VNCHandler vncHandler(primaryConn);
+    
     // Initialize routes
     APIRoutes apiRoutes(&vmOps, &hostManager, &userOps, &paasOps, 
-                       &swarmOps, &logger, &flavorMgr, &networkMgr, &imageMgr);
+                       &swarmOps, &logger, &flavorMgr, &networkMgr, &imageMgr, &vncHandler);
     
     // Create server
     Server svr;

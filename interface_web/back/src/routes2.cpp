@@ -7,6 +7,7 @@
 #include "../include/swarm_operations.hpp"
 #include "../include/host_manager.hpp"
 #include "../include/json.hpp"
+#include "../include/vnc_handler.hpp"
 #include "../include/flavor_manager.hpp"
 #include "../include/network_manager.hpp"
 #include "../include/baseimage_manager.hpp"
@@ -21,9 +22,9 @@ using json = nlohmann::json;
 APIRoutes::APIRoutes(VMOperations* operations, HostManager* mgr, UserOperations* user_operations,
     PaaSOperations *paas, SwarmOperations *swarm, 
     ResourceLogger* log, FlavorManager *flMgr, 
-    NetworkManager *ntMgr, BaseImageManager* biMgr) 
+    NetworkManager *ntMgr, BaseImageManager* biMgr, VNCHandler *vnc) 
     : vmOps(operations), manager(mgr), userOps(user_operations), paasOps(paas), swarmOps(swarm), Rlogger(log), 
-    networkMgr(ntMgr),flavorMgr(flMgr), baseImageManager(biMgr){}
+    networkMgr(ntMgr),flavorMgr(flMgr), baseImageManager(biMgr), vncHandler(vnc){}
 
 // Flavors
 void APIRoutes::handleListFlavors(const httplib::Request& __attribute__((unused)) req, httplib::Response& res){
@@ -65,7 +66,7 @@ void APIRoutes::handleCreateCluster(const httplib::Request& req, httplib::Respon
     int numManagers = body["numManagers"];
     int numWorkers = body["numWorkers"];
 
-    result = swarmOps->createSwarmCluster(clusterName, owner, numManagers, numWorkers);
+    result = swarmOps->createSwarmClusterWithHosts(clusterName, owner, numManagers, numWorkers);
     res.set_content(result.dump(), "application/json");    
 }
 

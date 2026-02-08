@@ -93,11 +93,20 @@ std::string PaaSOperations::generateDockerComposeFile(const json& appConfig) {
     compose << "      - " << appConfig["id"].get<std::string>() << "_data:/data\n";
     
     // Add environment variables if needed
-    if (appConfig.contains("environment") && appConfig["environment"].is_object()) {
+    if (appConfig.contains("environment") && 
+        appConfig["environment"].is_object() && 
+        !appConfig["environment"].empty()) 
+    {
+
         compose << "    environment:\n";
         for (auto& [key, value] : appConfig["environment"].items()) {
-            compose << "      " << key << ": " << value.get<std::string>() << "\n";
+        if (value.is_string()) {
+            compose << "      " << key << ": \"" << value.get<std::string>() << "\"\n";
+        } else {
+            compose << "      " << key << ": \"" << value.dump() << "\"\n";
         }
+}
+
     }
     
     // Add networks
@@ -178,7 +187,7 @@ json PaaSOperations::deployApplication(const json& appConfig) {
         }
     
         // Step 4: Create compose directory
-        std::string composeDir = "/var/lib/thoth-paas/" + appId;
+        std::string composeDir = "/var/lib/thoth-cloud/thoth-paas/" + appId;
         std::string mkdirCmd = "mkdir -p " + composeDir;
         auto mkdirResult = remoteExecutor->execute(mkdirCmd);
         if (!mkdirResult.success()) {
@@ -253,7 +262,7 @@ json PaaSOperations::deployApplicationEnhanced(const json& appConfig) {
     }
     
     // Create compose directory
-    std::string composeDir = "/var/lib/thoth-paas/" + appId;
+    std::string composeDir = "/var/lib/thoth-cloud/thoth-paas/" + appId;
     std::string mkdirCmd = "mkdir -p " + composeDir;
     auto mkdirResult = remoteExecutor->execute(mkdirCmd);
     if (!mkdirResult.success()) {
@@ -412,7 +421,7 @@ json PaaSOperations::getApplicationStatus(const std::string& appId) {
 }
 
 bool PaaSOperations::stopApplication(const std::string& appId) {
-    std::string composeDir = "/var/lib/thoth-paas/" + appId;
+    std::string composeDir = "/var/lib/thoth-cloud/thoth-paas/" + appId;
     std::string cmd = "cd " + composeDir + " && sudo docker-compose down 2>&1";
     auto result = remoteExecutor->execute(cmd);
     
@@ -421,7 +430,7 @@ bool PaaSOperations::stopApplication(const std::string& appId) {
 }
 
 bool PaaSOperations::startApplication(const std::string& appId) {
-    std::string composeDir = "/var/lib/thoth-paas/" + appId;
+    std::string composeDir = "/var/lib/thoth-cloud/thoth-paas/" + appId;
     std::string cmd = "cd " + composeDir + " && sudo docker-compose up -d 2>&1";
     auto result = remoteExecutor->execute(cmd);
     
@@ -431,7 +440,7 @@ bool PaaSOperations::startApplication(const std::string& appId) {
 
 bool PaaSOperations::deleteApplication(const std::string& appId) {
     // Stop and remove containers
-    std::string composeDir = "/var/lib/thoth-paas/" + appId;
+    std::string composeDir = "/var/lib/thoth-cloud/thoth-paas/" + appId;
     std::string stopCmd = "cd " + composeDir + " && sudo docker-compose down -v 2>&1";
     remoteExecutor->execute(stopCmd);
     
@@ -588,4 +597,250 @@ bool PaaSOperations::deleteOnlyOffice(const std::string& username) {
     remoteExecutor->execute(rmVolumeCmd);
     
     return true;
+}
+
+
+json PaaSOperations::getApplicationAccessInfo(const std::string& appId) {
+    json result;
+    result["success"] = false;
+    
+    // Load application config
+    std::string appsFile = "/var/lib/thoth-cloud/paas_apps.json";
+    json apps;
+    
+    std::ifstream file(appsFile);
+    if (!file.is_open()) {
+        result["error"] = "Could not load applications";
+        return result;
+    }
+    
+    try {
+        file >> apps;
+        file.close();
+    } catch (const std::exception& e) {
+        result["error"] = "Error parsing applications file";
+        return result;
+    }
+    
+    // Find the application
+    json appConfig;
+    bool found = false;
+    
+    for (const auto& app : apps) {
+        if (app["id"] == appId) {
+            appConfig = app;
+            found = true;
+            break;
+        }
+    }
+    
+    if (!found) {
+        result["error"] = "Application not found";
+        return result;
+    }
+    
+    // Get container information
+    std::string containerName = appConfig["name"];
+    std::string cmd = "sudo docker inspect " + containerName + " --format='{{json .}}'";
+    auto inspectResult = remoteExecutor->execute(cmd);
+    
+    if (!inspectResult.success()) {
+        result["error"] = "Application not running";
+        return result;
+    }
+    
+    json containerInfo;
+    try {
+        containerInfo = json::parse(inspectResult.output);
+    } catch (const std::exception& e) {
+        result["error"] = "Failed to parse container info";
+        return result;
+    }
+    
+    // Extract access URLs
+    json accessUrls = json::array();
+    
+    // Get host IP
+    std::string hostIP = getHostPublicIP();
+    
+    // Parse port mappings
+    if (appConfig.contains("ports") && appConfig["ports"].is_array()) {
+        for (const auto& portMapping : appConfig["ports"]) {
+            std::string portStr = portMapping.get<std::string>();
+            
+            // Format: "host_port:container_port" or "container_port"
+            size_t colonPos = portStr.find(':');
+            int hostPort = 0;
+            int containerPort = 0;
+            
+            if (colonPos != std::string::npos) {
+                hostPort = std::stoi(portStr.substr(0, colonPos));
+                containerPort = std::stoi(portStr.substr(colonPos + 1));
+            } else {
+                containerPort = std::stoi(portStr);
+                hostPort = containerPort;
+            }
+            
+            // Determine protocol (HTTP/HTTPS)
+            std::string protocol = "http";
+            if (hostPort == 443 || containerPort == 443) {
+                protocol = "https";
+            }
+            
+            // Build URL
+            std::string url = protocol + "://" + hostIP + ":" + std::to_string(hostPort);
+            
+            accessUrls.push_back({
+                {"url", url},
+                {"hostPort", hostPort},
+                {"containerPort", containerPort},
+                {"protocol", protocol}
+            });
+        }
+    }
+    
+    result["success"] = true;
+    result["appId"] = appId;
+    result["appName"] = containerName;
+    result["status"] = appConfig.value("status", "unknown");
+    result["accessUrls"] = accessUrls;
+    result["primaryUrl"] = accessUrls.empty() ? "" : accessUrls[0]["url"];
+    result["hostIP"] = hostIP;
+    
+    return result;
+}
+
+std::string PaaSOperations::getHostPublicIP() {
+    // Try to get public IP
+    auto publicIPResult = remoteExecutor->execute("curl -s ifconfig.me || curl -s icanhazip.com");
+    
+    if (publicIPResult.success() && !publicIPResult.output.empty()) {
+        std::string ip = publicIPResult.output;
+        // Remove newlines
+        ip.erase(std::remove(ip.begin(), ip.end(), '\n'), ip.end());
+        ip.erase(std::remove(ip.begin(), ip.end(), '\r'), ip.end());
+        return ip;
+    }
+    
+    // Fallback to local network IP
+    auto localIPResult = remoteExecutor->execute(
+        "hostname -I | awk '{print $1}'"
+    );
+    
+    if (localIPResult.success() && !localIPResult.output.empty()) {
+        std::string ip = localIPResult.output;
+        ip.erase(std::remove(ip.begin(), ip.end(), '\n'), ip.end());
+        ip.erase(std::remove(ip.begin(), ip.end(), '\r'), ip.end());
+        return ip;
+    }
+    
+    return "localhost";
+}
+
+json PaaSOperations::setupReverseProxy(const std::string& appId, const std::string& domain) {
+    json result;
+    result["success"] = false;
+    
+    // Get application info
+    auto appInfo = getApplicationAccessInfo(appId);
+    if (!appInfo["success"].get<bool>()) {
+        result["error"] = "Could not get application info";
+        return result;
+    }
+    
+    if (appInfo["accessUrls"].empty()) {
+        result["error"] = "No ports configured for this application";
+        return result;
+    }
+    
+    int containerPort = appInfo["accessUrls"][0]["containerPort"];
+    
+    // Check if Nginx/Traefik is installed
+    auto nginxCheck = remoteExecutor->execute("which nginx");
+    
+    if (!nginxCheck.success()) {
+        result["error"] = "Nginx not installed. Install it first: apt install nginx";
+        return result;
+    }
+    
+    // Create Nginx configuration
+    std::stringstream nginxConfig;
+    nginxConfig << "server {\n";
+    nginxConfig << "    listen 80;\n";
+    nginxConfig << "    server_name " << domain << ";\n\n";
+    nginxConfig << "    location / {\n";
+    nginxConfig << "        proxy_pass http://localhost:" << containerPort << ";\n";
+    nginxConfig << "        proxy_set_header Host $host;\n";
+    nginxConfig << "        proxy_set_header X-Real-IP $remote_addr;\n";
+    nginxConfig << "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n";
+    nginxConfig << "        proxy_set_header X-Forwarded-Proto $scheme;\n";
+    nginxConfig << "    }\n";
+    nginxConfig << "}\n";
+    
+    // Write config file
+    std::string configPath = "/etc/nginx/sites-available/" + appId;
+    std::string writeCmd = "echo '" + nginxConfig.str() + "' | sudo tee " + configPath;
+    
+    auto writeResult = remoteExecutor->execute(writeCmd);
+    if (!writeResult.success()) {
+        result["error"] = "Failed to write Nginx config";
+        return result;
+    }
+    
+    // Create symlink
+    std::string symlinkCmd = "sudo ln -sf " + configPath + " /etc/nginx/sites-enabled/" + appId;
+    remoteExecutor->execute(symlinkCmd);
+    
+    // Test and reload Nginx
+    auto testResult = remoteExecutor->execute("sudo nginx -t");
+    if (!testResult.success()) {
+        result["error"] = "Nginx configuration test failed";
+        return result;
+    }
+    
+    auto reloadResult = remoteExecutor->execute("sudo systemctl reload nginx");
+    if (!reloadResult.success()) {
+        result["error"] = "Failed to reload Nginx";
+        return result;
+    }
+    
+    result["success"] = true;
+    result["domain"] = domain;
+    result["url"] = "http://" + domain;
+    result["message"] = "Reverse proxy configured successfully";
+    
+    return result;
+}
+
+json PaaSOperations::enableSSL(const std::string& appId, const std::string& domain, const std::string& email) {
+    json result;
+    result["success"] = false;
+    
+    // Check if certbot is installed
+    auto certbotCheck = remoteExecutor->execute("which certbot");
+    if (!certbotCheck.success()) {
+        result["error"] = "Certbot not installed. Install it first: apt install certbot python3-certbot-nginx";
+        return result;
+    }
+    
+    // Run certbot to get SSL certificate
+    std::stringstream certbotCmd;
+    certbotCmd << "sudo certbot --nginx -d " << domain 
+               << " --non-interactive --agree-tos --email " << email
+               << " --redirect";
+    
+    auto certbotResult = remoteExecutor->execute(certbotCmd.str());
+    
+    if (certbotResult.output.find("Successfully") == std::string::npos &&
+        certbotResult.output.find("already exists") == std::string::npos) {
+        result["error"] = "Failed to obtain SSL certificate: " + certbotResult.output;
+        return result;
+    }
+    
+    result["success"] = true;
+    result["domain"] = domain;
+    result["url"] = "https://" + domain;
+    result["message"] = "SSL certificate installed successfully";
+    
+    return result;
 }

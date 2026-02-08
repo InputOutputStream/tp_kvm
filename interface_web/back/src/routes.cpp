@@ -226,6 +226,20 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Get("/api/users/:username/usage", [this](const httplib::Request& req, httplib::Response& res) {
             this->handleGetUserUsage(req, res);
         });
+    
+    svr.Get("/api/users/usage/all", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        
+        if (!userCtx.isAdmin) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Admin access required"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json result = userOps->getAllUsersUsage();
+        res.set_content(result.dump(), "application/json");
+    });
 
     // PaaS routes
     svr.Post("/api/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
@@ -390,7 +404,7 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Get("/api/saas/billing", [this](const httplib::Request& req, httplib::Response& res) {
         this->handleGetSaaSBilling(req, res);
     });
-
+    
 
     // PaaS monitoring endpoints
     svr.Get("/api/paas/database/credentials", 
@@ -463,6 +477,210 @@ void APIRoutes::setup(httplib::Server& svr) {
     svr.Get("/api/hosts/available", [this](auto& req, auto& res) {
         handleGetHostsAvailableForMigration(req, res);
     });
+
+
+    // ========================================
+    // VNC CONSOLE ROUTES
+    // ========================================
+
+    svr.Get("/api/vms/:name/vnc", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            json error = {{"success", false}, {"error", "Unauthorized"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        std::string vmName = req.path_params.at("name");
+        
+        if (!checkVMAccess(vmName, userCtx)) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Access denied"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json result = vncHandler->getVNCInfo(vmName);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Post("/api/vms/:name/vnc/enable", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string vmName = req.path_params.at("name");
+        
+        if (!checkVMAccess(vmName, userCtx)) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Access denied"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json body = json::parse(req.body);
+        std::string password = body.value("password", "");
+        
+        json result = vncHandler->enableVNC(vmName, password);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Get("/api/vnc/status", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        json result = vncHandler->getNoVNCStatus();
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // ========================================
+    // PORT FORWARDING & NETWORK ROUTES
+    // ========================================
+
+    svr.Get("/api/vms/:name/ip", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string vmName = req.path_params.at("name");
+        
+        if (!checkVMAccess(vmName, userCtx)) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Access denied"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json result = vmOps->getVMIP(vmName);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Post("/api/vms/:name/forward", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string vmName = req.path_params.at("name");
+        
+        if (!checkVMAccess(vmName, userCtx)) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Access denied"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json body = json::parse(req.body);
+        int vmPort = body["vmPort"];
+        int hostPort = body.value("hostPort", 0);
+        std::string protocol = body.value("protocol", "tcp");
+        
+        json result = vmOps->createPortForward(vmName, vmPort, hostPort, protocol);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Get("/api/vms/:name/forwards", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string vmName = req.path_params.at("name");
+        
+        if (!checkVMAccess(vmName, userCtx)) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Access denied"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json result = vmOps->listPortForwards(vmName);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Delete("/api/vms/:name/forward/:id", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string vmName = req.path_params.at("name");
+        std::string forwardId = req.path_params.at("id");
+        
+        if (!checkVMAccess(vmName, userCtx)) {
+            res.status = 403;
+            json error = {{"success", false}, {"error", "Access denied"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+        
+        json result = vmOps->deletePortForward(vmName, forwardId);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // ========================================
+    // PAAS ACCESS & NETWORKING ROUTES
+    // ========================================
+
+    svr.Get("/api/paas/apps/:id/access", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string appId = req.path_params.at("id");
+        
+        // Check if user owns this app
+        // TODO: Implement app ownership check
+        
+        json result = paasOps->getApplicationAccessInfo(appId);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Post("/api/paas/apps/:id/proxy", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string appId = req.path_params.at("id");
+        json body = json::parse(req.body);
+        std::string domain = body["domain"];
+        
+        json result = paasOps->setupReverseProxy(appId, domain);
+        res.set_content(result.dump(), "application/json");
+    });
+
+    svr.Post("/api/paas/apps/:id/ssl", [this](const httplib::Request& req, httplib::Response& res) {
+        auto userCtx = getUserContext(req, userOps);
+        if (!userCtx.is_auth) {
+            res.status = 401;
+            return;
+        }
+        
+        std::string appId = req.path_params.at("id");
+        json body = json::parse(req.body);
+        std::string domain = body["domain"];
+        std::string email = body["email"];
+        
+        json result = paasOps->enableSSL(appId, domain, email);
+        res.set_content(result.dump(), "application/json");
+    });
+
+
 }
 
 void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {
@@ -626,11 +844,10 @@ void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {    
     // Parse JSON body
-    fprintf(stderr, "Received deploy request \n");
+    fprintf(stderr, "Received deploy request 1\n");
     json body;
     try {
         body = json::parse(req.body);
-   
     } catch (const std::exception& e) {
         std::cerr << "JSON parse error: " << e.what() << std::endl;
         res.status = 400;
@@ -642,7 +859,10 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
         return;
     }
     
+        fprintf(stderr, "Received deploy request 2\n");
+
     auto userCtx = getUserContext(req, userOps);
+    fprintf(stderr, "Received deploy request 3\n");
 
     // Validate user context
     if (userCtx.userId.empty()) {
@@ -651,19 +871,23 @@ void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& r
         res.set_content(error.dump(), "application/json");
         return;
     }
+    fprintf(stderr, "Received deploy request 4\n");
 
   // Add owner info
     body["owner"] = userCtx.userId;
     body["ownerRole"] = userCtx.role;
     
     // Generate internal VM name: userid__hostname__timestamp
+
     VMNameManager nameManager;
     std::string userHostname = body["hostname"];
     std::string internalName = nameManager.createVMName(userCtx.userId, userHostname);
-    
+        fprintf(stderr, "Received deploy request 5\n");
+
     body["hostname"] = internalName;
     body["displayName"] = userHostname;  // Keep original for reference
     
+
     bool success = vmOps->deployVM(body);
     
     if (success) {
@@ -1039,7 +1263,8 @@ void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& 
         return;
     }
     
-    json result = userOps->getAllUsersUsage();
+    // Get all users with their current usage
+    json result = userOps->listUsers();
     res.set_content(result.dump(), "application/json");
 }
 
@@ -1110,17 +1335,25 @@ void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response&
 
 }
 void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Response& res){
-    json body;
-    try {
-        body = json::parse(req.body);
-    } catch (...) {
-        res.status = 400;
-        json error = {{"success", false}, {"error", "Invalid JSON"}};
+    auto userCtx = getUserContext(req, userOps);
+    
+    if (!userCtx.is_auth) {
+        res.status = 401;
+        json error = {{"success", false}, {"error", "Authentication required"}};
         res.set_content(error.dump(), "application/json");
         return;
     }
 
     std::string username = req.matches[1];
+    
+    // Non-admin users can only view their own usage
+    if (!userCtx.isAdmin && username != userCtx.userId) {
+        res.status = 403;
+        json error = {{"success", false}, {"error", "Access denied"}};
+        res.set_content(error.dump(), "application/json");
+        return;
+    }
+    
     json result = userOps->getUserUsage(username);
     
     if (!result["success"].get<bool>()) {

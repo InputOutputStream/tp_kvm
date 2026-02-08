@@ -1,12 +1,16 @@
 /* ==========================================
-   THOTH CLOUD - Cards & Grid Components
+   THOTH CLOUD - CARD COMPONENTS
+   VM Cards, Network Cards, Cluster Cards, and all other card types
    ========================================== */
 
-/* VM Cards Grid */
+/* ==========================================
+   VM CARDS
+   ========================================== */
 .vm-cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: var(--spacing-lg);
+    margin-top: var(--spacing-lg);
 }
 
 .vm-card {
@@ -14,32 +18,14 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: var(--spacing-lg);
-    cursor: pointer;
     transition: all var(--transition-base);
-    position: relative;
-    overflow: hidden;
-}
-
-.vm-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
-    transform: scaleX(0);
-    transition: transform var(--transition-base);
-}
-
-.vm-card:hover::before {
-    transform: scaleX(1);
+    box-shadow: var(--shadow-sm);
 }
 
 .vm-card:hover {
-    border-color: var(--primary);
+    transform: translateY(-2px);
     box-shadow: var(--shadow-md);
-    transform: translateY(-4px);
+    border-color: var(--primary);
 }
 
 .vm-card-header {
@@ -47,144 +33,276 @@
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border);
 }
 
-.vm-card-title {
-    font-size: 16px;
+.vm-card-header h3 {
+    font-size: 18px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 6px;
-}
-
-.vm-card-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: var(--radius-full);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.vm-card-status.running {
-    background: rgba(46, 125, 50, 0.1);
-    color: var(--success);
-}
-
-.vm-card-status.stopped {
-    background: rgba(198, 40, 40, 0.1);
-    color: var(--danger);
-}
-
-.vm-card-status.paused {
-    background: rgba(249, 168, 37, 0.1);
-    color: var(--warning);
+    margin: 0 0 var(--spacing-xs) 0;
 }
 
 .vm-card-meta {
+    font-size: 13px;
+    color: var(--text-secondary);
     display: flex;
     gap: var(--spacing-md);
-    color: var(--text-secondary);
-    font-size: 13px;
-    margin-bottom: var(--spacing-sm);
 }
 
-.vm-card-stats {
+.vm-card-body {
+    margin-bottom: var(--spacing-md);
+}
+
+.vm-card-info {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-sm);
-    padding-top: var(--spacing-md);
-    border-top: 1px solid var(--border-light);
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
 }
 
-.vm-stat-item {
-    font-size: 13px;
+.vm-info-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.vm-info-item strong {
+    font-size: 12px;
     color: var(--text-secondary);
-}
-
-.vm-stat-item strong {
-    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
     font-weight: 600;
 }
 
-/* Apps Grid */
-.apps-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--spacing-lg);
+.vm-info-item span {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
-.app-card {
+.vm-info-item code {
+    background: var(--bg-hover);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: var(--primary);
+    border: 1px solid var(--border);
+}
+
+.vm-card-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border);
+}
+
+.vm-card-actions .btn {
+    flex: 1;
+    justify-content: center;
+}
+
+/* VM Info Panel (Detail View) */
+.vm-info-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+}
+
+.vm-info-panel h4 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border);
+}
+
+.vm-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+/* ==========================================
+   NETWORK CARDS
+   ========================================== */
+.network-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: var(--spacing-lg);
+    margin-top: var(--spacing-lg);
+}
+
+.network-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: var(--spacing-lg);
     transition: all var(--transition-base);
+    box-shadow: var(--shadow-sm);
 }
 
-.app-card:hover {
-    border-color: var(--primary);
+.network-card:hover {
+    transform: translateY(-2px);
     box-shadow: var(--shadow-md);
-    transform: translateY(-4px);
+    border-color: var(--primary);
 }
 
-.app-card-icon {
-    width: 56px;
-    height: 56px;
-    background: var(--bg-hover);
-    border-radius: var(--radius-md);
+.network-card-header {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 32px;
+    justify-content: space-between;
+    align-items: flex-start;
     margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border);
 }
 
-.app-card-title {
+.network-card-header h4 {
     font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 6px;
-}
-
-.app-card-description {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-bottom: var(--spacing-md);
-    line-height: 1.5;
-}
-
-.app-card-meta {
+    margin: 0 0 var(--spacing-xs) 0;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding-top: var(--spacing-md);
-    border-top: 1px solid var(--border-light);
-    margin-bottom: var(--spacing-md);
-}
-
-.app-category-badge {
-    padding: 4px 10px;
-    border-radius: var(--radius-full);
-    font-size: 11px;
-    font-weight: 600;
-    background: var(--bg-hover);
-    color: var(--text-secondary);
-}
-
-.app-price {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--primary);
-}
-
-.app-card-actions {
-    display: flex;
     gap: var(--spacing-sm);
 }
 
-/* Cluster Cards */
-.clusters-grid {
+.network-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+}
+
+.network-status.active {
+    background: rgba(46, 125, 50, 0.1);
+    color: var(--success);
+}
+
+.network-status.inactive {
+    background: rgba(198, 40, 40, 0.1);
+    color: var(--danger);
+}
+
+.network-status.active::before {
+    content: '●';
+    margin-right: 4px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.network-status.inactive::before {
+    content: '○';
+    margin-right: 4px;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.network-type-badge {
+    background: var(--primary);
+    color: white;
+    padding: 6px 14px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.network-card-body {
+    margin-bottom: var(--spacing-md);
+}
+
+.network-info-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-md);
+}
+
+.network-info-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.network-info-item strong {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.network-info-item code {
+    background: var(--bg-hover);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+    font-size: 13px;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.network-info-item code.network-id {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    word-break: break-all;
+}
+
+.network-info-item span {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.network-card-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border);
+}
+
+.network-card-actions .btn {
+    flex: 1;
+    justify-content: center;
+}
+
+/* Network Info Banner */
+.network-info-banner {
+    background: var(--bg-hover);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--spacing-lg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid var(--border-light);
+}
+
+.network-info-banner span {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+/* ==========================================
+   CLUSTER CARDS
+   ========================================== */
+.cluster-cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: var(--spacing-lg);
@@ -194,651 +312,376 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    overflow: hidden;
+    padding: var(--spacing-lg);
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-sm);
+}
+
+.cluster-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary);
 }
 
 .cluster-header {
-    padding: var(--spacing-lg);
-    border-bottom: 1px solid var(--border-light);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border);
 }
 
 .cluster-header h3 {
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 600;
     color: var(--text-primary);
+    margin: 0;
 }
 
 .cluster-body {
-    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
 }
 
 .cluster-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.cluster-info .info-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+}
+
+.cluster-info .info-icon {
+    font-size: 18px;
+}
+
+.cluster-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: flex-end;
+}
+
+/* Node Items (in cluster details) */
+.nodes-list {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
 }
 
-.info-item {
+.node-item {
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-md);
+}
+
+.node-info {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: var(--spacing-sm);
-    font-size: 14px;
+    margin-bottom: var(--spacing-sm);
+}
+
+.node-info strong {
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.node-role-badge {
+    background: var(--primary);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.node-details {
+    display: flex;
+    gap: var(--spacing-md);
+    font-size: 13px;
     color: var(--text-secondary);
 }
 
-.info-icon {
-    font-size: 18px;
-}
-
-.cluster-actions {
+/* ==========================================
+   BILLING CARDS
+   ========================================== */
+.billing-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: var(--spacing-lg);
-    border-top: 1px solid var(--border-light);
-    display: flex;
-    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-lg);
 }
 
-/* Chart Cards */
-.monitoring-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
-    gap: var(--spacing-lg);
+.billing-card h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-lg);
 }
 
+/* ==========================================
+   CHART CARDS
+   ========================================== */
 .chart-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
 }
 
 .chart-card h3 {
     font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: var(--spacing-md);
+    margin: 0 0 var(--spacing-lg) 0;
 }
 
 .chart-card canvas {
-    max-height: 300px;
-}
-
-/* Billing Cards */
-.billing-stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--spacing-lg);
-    margin-bottom: var(--spacing-xl);
-}
-
-.billing-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--spacing-lg);
-    text-align: center;
-}
-
-.billing-card h4 {
-    font-size: 14px;
-    color: var(--text-secondary);
-    margin-bottom: var(--spacing-sm);
-}
-
-.billing-amount {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--primary);
-}
-
-/* Swarm Config Card */
-.swarm-config-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--spacing-xl);
-    margin-bottom: var(--spacing-xl);
-}
-
-.swarm-config-card h3 {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: var(--spacing-lg);
-}
-
-.swarm-form {
-    max-width: 600px;
-}
-
-/* Details Panel */
-.details-panel {
-    position: fixed;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 480px;
-    background: var(--bg-card);
-    border-left: 1px solid var(--border);
-    box-shadow: var(--shadow-lg);
-    transform: translateX(100%);
-    transition: transform var(--transition-base);
-    z-index: 1001;
-    display: flex;
-    flex-direction: column;
-}
-
-.details-panel.open {
-    transform: translateX(0);
-}
-
-.panel-header {
-    padding: var(--spacing-lg);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.panel-header h2 {
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.btn-close {
-    background: none;
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-sm);
-    transition: all var(--transition-fast);
-}
-
-.btn-close:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.panel-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--spacing-lg);
-}
-
-.vm-panel-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-sm);
-    margin-bottom: var(--spacing-lg);
-}
-
-.vm-stats-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-md);
-    margin-bottom: var(--spacing-lg);
-}
-
-.stat-item {
-    background: var(--bg-hover);
-    padding: var(--spacing-md);
-    border-radius: var(--radius-sm);
-    display: flex;
-    gap: var(--spacing-sm);
-}
-
-.stat-item .stat-icon {
-    font-size: 24px;
-}
-
-.stat-item .stat-label {
-    font-size: 12px;
-    color: var(--text-secondary);
-    margin-bottom: 4px;
-}
-
-.stat-item .stat-value {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.vm-info-text {
-    background: var(--bg-main);
-    padding: var(--spacing-md);
-    border-radius: var(--radius-sm);
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-secondary);
-    max-height: 300px;
-    overflow-y: auto;
-    margin-bottom: var(--spacing-lg);
-}
-
-.snapshots-section {
-    margin-top: var(--spacing-lg);
-}
-
-.snapshots-grid {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-sm);
-}
-
-.snapshot-item {
-    background: var(--bg-hover);
-    padding: var(--spacing-md);
-    border-radius: var(--radius-sm);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.snapshot-info h4 {
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.snapshot-info p {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.snapshot-actions {
-    display: flex;
-    gap: var(--spacing-xs);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .vm-cards-grid,
-    .apps-grid,
-    .clusters-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .monitoring-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .details-panel {
-        width: 100%;
-    }
+    width: 100% !important;
+    height: 200px !important;
 }
 
 /* ==========================================
-   NETWORK CARDS
+   HOST CARDS (Monitoring)
    ========================================== */
-
-.networks-container {
-    padding: 20px 0;
-}
-
-.network-section {
-    margin-bottom: 40px;
-}
-
-.network-section h3 {
-    margin-bottom: 20px;
-    color: var(--text-primary);
-}
-
-.network-cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 20px;
-}
-
-.network-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 20px;
-    transition: all 0.3s ease;
-}
-
-.network-card:hover {
-    border-color: var(--primary-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.network-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.network-card-header h4 {
-    margin: 0;
-    color: var(--text-primary);
-}
-
-.network-type-badge {
-    padding: 4px 12px;
-    background: rgba(0, 132, 61, 0.1);
-    border-radius: 12px;
-    font-size: 0.85em;
-    color: var(--primary-color);
-}
-
-.network-card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.network-info-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.9em;
-}
-
-.network-info-item code {
-    padding: 2px 8px;
-    background: rgba(0, 0, 0, 0.05);
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-}
-
-/* ==========================================
-   HOST CARDS
-   ========================================== */
-
-.hosts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
-    gap: 20px;
-    padding: 20px 0;
-}
-
 .host-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 20px;
-    transition: all 0.3s ease;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    transition: all var(--transition-base);
 }
 
 .host-card:hover {
-    border-color: var(--primary-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
 }
 
 .host-card-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid var(--border-color);
+    margin-bottom: var(--spacing-lg);
 }
 
-.host-card-header h3 {
-    margin: 0 0 5px 0;
+.host-info h3 {
+    margin: 0 0 var(--spacing-xs) 0;
     color: var(--text-primary);
+    font-size: 18px;
 }
 
 .host-uri {
-    font-size: 0.85em;
     color: var(--text-secondary);
-    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    margin-bottom: var(--spacing-sm);
+    font-family: monospace;
 }
 
-.host-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-    margin-bottom: 20px;
-}
-
-.host-stat {
-    background: rgba(0, 0, 0, 0.02);
-    padding: 12px;
-    border-radius: 8px;
-}
-
-.stat-header {
+.host-tags {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-    font-size: 0.9em;
-    font-weight: 500;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
 }
 
-.progress-bar {
-    height: 8px;
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 5px;
-}
-
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--primary-color), var(--success-color));
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-.host-stat small {
-    font-size: 0.8em;
-    color: var(--text-secondary);
-}
-
-.host-vm-count {
-    margin: 5px 0 0 0;
-    font-size: 1.1em;
+.host-tag {
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
     font-weight: 600;
+}
+
+.host-tag.active {
+    background: rgba(46, 125, 50, 0.1);
+    color: var(--success);
+}
+
+.host-tag.inactive {
+    background: rgba(198, 40, 40, 0.1);
+    color: var(--danger);
+}
+
+.host-tag.primary {
+    background: rgba(249, 168, 37, 0.1);
+    color: var(--warning);
 }
 
 .host-actions {
     display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
+    gap: var(--spacing-xs);
 }
 
-/* ==========================================
-   CLUSTER CARDS
-   ========================================== */
-
-.cluster-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 20px;
-    transition: all 0.3s ease;
+.host-resources {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
 }
 
-.cluster-card:hover {
-    border-color: var(--primary-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+.resource-meter {
+    margin-bottom: var(--spacing-sm);
 }
 
-.cluster-header {
+.resource-label {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid var(--border-color);
+    margin-bottom: var(--spacing-xs);
+    font-size: 14px;
 }
 
-.cluster-body {
-    margin-bottom: 20px;
+.progress-fill.cpu {
+    background: linear-gradient(90deg, #00843D, #00C853);
 }
 
-.cluster-info {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+.progress-fill.memory {
+    background: linear-gradient(90deg, #2196F3, #03A9F4);
 }
 
-.info-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.9em;
+.progress-fill.disk {
+    background: linear-gradient(90deg, #9C27B0, #E91E63);
 }
 
-.info-icon {
-    font-size: 1.2em;
-}
-
-.cluster-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-/* ==========================================
-   NODE ITEMS
-   ========================================== */
-
-.nodes-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.node-item {
-    background: rgba(0, 0, 0, 0.02);
-    padding: 15px;
-    border-radius: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.node-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.node-role-badge {
-    padding: 3px 10px;
-    background: rgba(0, 132, 61, 0.1);
-    border-radius: 12px;
-    font-size: 0.8em;
-    color: var(--primary-color);
-}
-
-.node-details {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 5px;
-    font-size: 0.85em;
-}
-
-/* ==========================================
-   INSTRUCTIONS DISPLAY
-   ========================================== */
-
-.instructions-text {
-    background: #1e1e1e;
-    color: #d4d4d4;
-    padding: 20px;
-    border-radius: 8px;
-    font-family: 'Courier New', monospace;
-    font-size: 0.9em;
-    line-height: 1.6;
-    overflow-x: auto;
-    max-height: 500px;
-    overflow-y: auto;
-}
-
-/* ==========================================
-   CLUSTER DETAILS GRID
-   ========================================== */
-
-.cluster-details-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-    margin-bottom: 20px;
-}
-
-.detail-item {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.detail-item strong {
-    font-size: 0.85em;
+.host-vms h4 {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: 14px;
     color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
-.detail-item code {
-    padding: 5px 10px;
-    background: rgba(0, 0, 0, 0.05);
+.vm-stats {
+    display: flex;
+    gap: var(--spacing-md);
+}
+
+.vm-stat {
+    padding: 4px 8px;
+    background: var(--bg-secondary);
     border-radius: 4px;
-    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.host-health {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--spacing-lg);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border);
+}
+
+.health-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.health-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.health-indicator.healthy .health-dot {
+    background: var(--success);
+}
+
+.health-indicator.degraded .health-dot {
+    background: var(--warning);
+}
+
+.health-indicator.warning .health-dot {
+    background: #FF5722;
+}
+
+.health-indicator.critical .health-dot {
+    background: var(--danger);
+    animation: pulse 1.5s infinite;
 }
 
 /* ==========================================
-   RESPONSIVE ADJUSTMENTS
+   RESPONSIVE CARDS
    ========================================== */
-
 @media (max-width: 768px) {
-    .hosts-grid,
-    .network-cards {
+    .vm-cards-grid,
+    .network-cards,
+    .cluster-cards {
         grid-template-columns: 1fr;
     }
     
-    .host-stats-grid,
+    .vm-card-info {
+        grid-template-columns: 1fr;
+    }
+    
+    .vm-card-actions,
+    .network-card-actions,
+    .cluster-actions {
+        flex-direction: column;
+    }
+    
+    .vm-card-actions .btn,
+    .network-card-actions .btn {
+        width: 100%;
+    }
+    
+    .vm-info-grid {
+        grid-template-columns: 1fr;
+    }
+    
     .cluster-info,
-    .cluster-details-grid {
+    .host-resources {
         grid-template-columns: 1fr;
     }
 }
 
 /* ==========================================
-   MODAL IMPROVEMENTS
+   CARD ANIMATIONS
    ========================================== */
-
-.modal-large {
-    max-width: 800px;
-}
-
-.modal-medium {
-    max-width: 600px;
-}
-
-/* Scrollable modal body */
-.modal-body {
-    max-height: calc(90vh - 150px);
-    overflow-y: auto;
-}
-
-/* Form row layout */
-.form-row {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-}
-
-@media (max-width: 768px) {
-    .form-row {
-        grid-template-columns: 1fr;
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }
+
+.vm-card,
+.network-card,
+.cluster-card,
+.paas-app-card {
+    animation: fadeInUp 0.3s ease;
+}
+
+/* Stagger animation for multiple cards */
+.vm-card:nth-child(1),
+.network-card:nth-child(1),
+.cluster-card:nth-child(1) { animation-delay: 0ms; }
+.vm-card:nth-child(2),
+.network-card:nth-child(2),
+.cluster-card:nth-child(2) { animation-delay: 50ms; }
+.vm-card:nth-child(3),
+.network-card:nth-child(3),
+.cluster-card:nth-child(3) { animation-delay: 100ms; }
+.vm-card:nth-child(4),
+.network-card:nth-child(4),
+.cluster-card:nth-child(4) { animation-delay: 150ms; }
+.vm-card:nth-child(5),
+.network-card:nth-child(5),
+.cluster-card:nth-child(5) { animation-delay: 200ms; }
+.vm-card:nth-child(6),
+.network-card:nth-child(6),
+.cluster-card:nth-child(6) { animation-delay: 250ms; }

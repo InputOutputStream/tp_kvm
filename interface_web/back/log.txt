@@ -1,0 +1,26 @@
+mkdir -p obj
+g++ -g -std=c++17 -Wall -Wextra   -c src/baseimage_manager.cpp -o obj/baseimage_manager.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/config_manager.cpp -o obj/config_manager.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/cors.cpp -o obj/cors.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/flavor_manager.cpp -o obj/flavor_manager.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/host_manager.cpp -o obj/host_manager.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/main.cpp -o obj/main.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/network_manager.cpp -o obj/network_manager.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/paas_operation.cpp -o obj/paas_operation.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/remote_executor.cpp -o obj/remote_executor.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/resource_logger.cpp -o obj/resource_logger.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/routes2.cpp -o obj/routes2.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/routes.cpp -o obj/routes.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/swarm_operations.cpp -o obj/swarm_operations.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/user_operations.cpp -o obj/user_operations.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/utils.cpp -o obj/utils.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/validation.cpp -o obj/validation.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/vm_operations.cpp -o obj/vm_operations.o
+g++ -g -std=c++17 -Wall -Wextra   -c src/vnc_handler.cpp -o obj/vnc_handler.o
+mkdir -p bin
+Linking Server...
+g++ obj/baseimage_manager.o obj/config_manager.o obj/cors.o obj/flavor_manager.o obj/host_manager.o obj/main.o obj/network_manager.o obj/paas_operation.o obj/remote_executor.o obj/resource_logger.o obj/routes2.o obj/routes.o obj/swarm_operations.o obj/user_operations.o obj/utils.o obj/validation.o obj/vm_operations.o obj/vnc_handler.o -o bin/server -lvirt -lpthread -lssl -lcrypto
+./bin/server
+✅ Added host: thoth-Standard-PC-Q35-ICH9-2009 (qemu+ssh://vps@192.168.122.241/system)
+✅ Added host: thoth-Standard-PC-Q35-ICH9-2009 (qemu+ssh://vps@192.168.122.241/system)
+Server started on http://localhost:3000

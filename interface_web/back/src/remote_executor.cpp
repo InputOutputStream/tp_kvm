@@ -3,6 +3,8 @@
 #include <sstream>
 #include <regex>
 #include <unistd.h>
+#include <sys/statvfs.h>
+#include <iostream>
 #include <sys/stat.h>
 
 namespace RemoteExec {
@@ -131,23 +133,19 @@ bool RemoteExecutor::directoryExists(const std::string& path) const {
     return result.success();
 }
 
-long long RemoteExecutor::getAvailableDiskSpace(const std::string& path) const {
-    // Use df to get available space in bytes
-    std::string cmd = "df -B1 \"" + path + "\" 2>/dev/null | tail -1 | awk '{print $4}'";
-    auto result = execute(cmd);
+
+long long RemoteExecutor::getAvailableDiskSpace(const std::string& path) const{
+    struct statvfs stat;
     
-    if (!result.success() || result.output.empty()) {
+    if (statvfs(path.c_str(), &stat) != 0) {
+        std::cerr << "Failed to get disk space for path: " << path << std::endl;
         return -1;
     }
     
-    try {
-        // Remove trailing newline and parse
-        std::string output = result.output;
-        output.erase(output.find_last_not_of("\n\r") + 1);
-        return std::stoll(output);
-    } catch (...) {
-        return -1;
-    }
+    // Calculate free space in bytes: free blocks * block size
+    unsigned long long freeBytes = static_cast<unsigned long long>(stat.f_bavail) * stat.f_frsize;
+    
+    return static_cast<long long>(freeBytes);
 }
 
 bool RemoteExecutor::commandExists(const std::string& command) const {

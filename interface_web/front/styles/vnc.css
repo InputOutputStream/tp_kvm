@@ -1,0 +1,555 @@
+/* VNC Console & Network Access Styles */
+
+/* VNC Console Modal */
+.vnc-console-modal {
+    z-index: 1000;
+}
+
+.console-url-section {
+    margin: 20px 0;
+}
+
+.url-copy-box {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.url-copy-box input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 14px;
+}
+
+.console-embed {
+    margin-top: 20px;
+}
+
+/* Access URLs */
+.app-access-urls {
+    margin: 15px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.app-access-urls h5 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.access-url-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: white;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.access-url-item:last-child {
+    margin-bottom: 0;
+}
+
+.url-link {
+    flex: 1;
+    color: #0066cc;
+    text-decoration: none;
+    font-family: monospace;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.url-link:hover {
+    text-decoration: underline;
+}
+
+.app-access-warning {
+    padding: 15px;
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    border-radius: 4px;
+    margin: 15px 0;
+}
+
+/* Access URL Cards */
+.access-url-card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.url-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.url-info strong {
+    color: #28a745;
+    font-size: 12px;
+    padding: 4px 8px;
+    background: #d4edda;
+    border-radius: 4px;
+}
+
+.url-info code {
+    flex: 1;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.url-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.port-mapping {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e9ecef;
+}
+
+.port-mapping small {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+/* Primary URL Banner */
+.primary-url-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 15px;
+    padding: 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.primary-url-banner .info-icon {
+    font-size: 24px;
+}
+
+.primary-url-banner strong {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+    opacity: 0.9;
+}
+
+.primary-link {
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.primary-link:hover {
+    text-decoration: underline;
+}
+
+/* Network Info Modal */
+.network-summary {
+    padding: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.network-summary .info-item {
+    margin-bottom: 10px;
+}
+
+.network-summary .info-item:last-child {
+    margin-bottom: 0;
+}
+
+.network-summary strong {
+    display: block;
+    margin-bottom: 5px;
+    opacity: 0.9;
+    font-size: 14px;
+}
+
+.network-summary code {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+.network-interface {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.network-interface h4 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 16px;
+}
+
+.interface-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.interface-details > div {
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.interface-details strong {
+    color: #6c757d;
+    font-size: 12px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.interface-details code {
+    color: #495057;
+    background: transparent;
+    padding: 0;
+}
+
+/* Port Forwarding Section */
+.port-forwarding-section {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 2px solid #dee2e6;
+}
+
+.port-forwarding-section h4 {
+    margin: 0 0 15px 0;
+    color: #495057;
+    font-size: 18px;
+}
+
+.forward-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.forward-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.forward-info strong {
+    font-size: 16px;
+    color: #495057;
+}
+
+.protocol-badge {
+    padding: 4px 8px;
+    background: #e7f3ff;
+    color: #0066cc;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Network Options */
+.network-options {
+    margin-top: 20px;
+}
+
+.network-options h4 {
+    margin: 0 0 15px 0;
+    color: #495057;
+}
+
+.network-options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.network-option-card {
+    background: white;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.network-option-card:hover {
+    border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.network-option-card h4 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 16px;
+}
+
+.network-option-card p {
+    margin: 0;
+    color: #6c757d;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+/* Host Info Section */
+.host-info {
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin: 15px 0;
+}
+
+.host-info strong {
+    color: #495057;
+    margin-right: 10px;
+}
+
+.host-info code {
+    padding: 6px 12px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+/* Access Info Section */
+.access-info-section {
+    margin-bottom: 20px;
+}
+
+.access-info-section h4 {
+    margin: 0 0 15px 0;
+    color: #495057;
+    font-size: 18px;
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 10px;
+}
+
+/* PaaS App Card Enhancements */
+.paas-app-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.paas-app-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.app-type-badge {
+    background: #e7f3ff;
+    color: #0066cc;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 10px;
+}
+
+.app-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.app-info-item {
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.app-info-item strong {
+    display: block;
+    color: #6c757d;
+    font-size: 12px;
+    margin-bottom: 5px;
+}
+
+.app-info-item code {
+    display: block;
+    color: #495057;
+    font-size: 13px;
+    background: transparent;
+    padding: 0;
+    word-break: break-all;
+}
+
+.app-info-item a {
+    color: #0066cc;
+    text-decoration: none;
+}
+
+.app-info-item a:hover {
+    text-decoration: underline;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .url-copy-box {
+        flex-direction: column;
+    }
+    
+    .access-url-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .url-actions {
+        justify-content: stretch;
+    }
+    
+    .url-actions button {
+        flex: 1;
+    }
+    
+    .network-options-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .interface-details {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Info/Warning Banners Enhancement */
+.info-banner,
+.warning-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 15px;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 15px 0;
+}
+
+.info-banner {
+    background: #e7f3ff;
+    border-left: 4px solid #0066cc;
+}
+
+.warning-banner {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+}
+
+.info-banner .info-icon,
+.warning-banner .warning-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.info-banner p,
+.warning-banner p {
+    margin: 0;
+    color: #495057;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.info-banner strong,
+.warning-banner strong {
+    display: block;
+    margin-bottom: 5px;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+/* Status Pills */
+.status-pill {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-pill.running {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-pill.stopped {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Loading States */
+.loading-text {
+    text-align: center;
+    padding: 20px;
+    color: #6c757d;
+}
+
+/* Modal Large Variant */
+.modal-large {
+    max-width: 900px;
+    width: 90%;
+}
+
+/* Button Variants */
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+
+.btn-warning {
+    background: #ffc107;
+    color: #212529;
+}
+
+.btn-warning:hover {
+    background: #e0a800;
+}

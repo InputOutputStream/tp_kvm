@@ -136,10 +136,14 @@ bool HostManager::updateHostResources(HostInfo& host) {
         return false;
     }
     
-    host.totalMemory = nodeInfo.memory;
+    host.totalMemory = nodeInfo.memory;  // This is in KB
     host.totalCPUs = nodeInfo.cpus;
     
-    // Get free memory
+    // Initialize available resources to total
+    host.availableCPUs = host.totalCPUs;
+    host.availableMemory = host.totalMemory;
+    
+    // Get free memory from system
     virNodeMemoryStatsPtr params = nullptr;
     int nparams = 0;
     
@@ -150,7 +154,8 @@ bool HostManager::updateHostResources(HostInfo& host) {
                                   params, &nparams, 0) == 0) {
             for (int i = 0; i < nparams; i++) {
                 if (strcmp(params[i].field, VIR_NODE_MEMORY_STATS_FREE) == 0) {
-                    host.availableMemory = params[i].value;
+                    // This is the system's free memory
+                    host.availableMemory = params[i].value;  // In KB
                 }
             }
         }
@@ -160,9 +165,12 @@ bool HostManager::updateHostResources(HostInfo& host) {
     // Get disk space using remote executor
     RemoteExec::RemoteExecutor exec(host.conn);
     host.availableDisk = exec.getAvailableDiskSpace("/var/lib/libvirt/images");
-    host.totalDisk = host.availableDisk; 
+    host.totalDisk = host.availableDisk;  
     
-    // Get VM counts
+    // Track resources used by VMs
+    unsigned long totalUsedMemory = 0;
+    int totalUsedCPUs = 0;
+    
     virDomainPtr* domains;
     int numDomains = virConnectListAllDomains(host.conn, &domains, 0);
     if (numDomains >= 0) {
@@ -172,10 +180,12 @@ bool HostManager::updateHostResources(HostInfo& host) {
         for (int i = 0; i < numDomains; i++) {
             virDomainInfo info;
             if (virDomainGetInfo(domains[i], &info) == 0) {
+                // Count all VMs (running or not) for resource allocation
+                totalUsedMemory += info.memory;  // In KB
+                totalUsedCPUs += info.nrVirtCpu;
+                
                 if (info.state == VIR_DOMAIN_RUNNING) {
                     host.activeVMs++;
-                    host.availableCPUs -= info.nrVirtCpu;
-                    host.availableMemory -= info.memory;
                 }
             }
             virDomainFree(domains[i]);
@@ -183,12 +193,32 @@ bool HostManager::updateHostResources(HostInfo& host) {
         free(domains);
     }
     
-    host.availableCPUs = host.totalCPUs; // Simplified cause should track actual usage, willupdate it later
-    host.cpuUsage = (host.totalCPUs - host.availableCPUs) * 100.0 / host.totalCPUs;
-    host.memoryUsage = (host.totalMemory - host.availableMemory) * 100.0 / host.totalMemory;
+    // Calculate ALLOCATED resources (what's committed to VMs)
+    // This is more accurate than just checking running VMs
+    // because even stopped VMs have resources allocated
+    if (totalUsedMemory < host.totalMemory) {
+        host.availableMemory = host.totalMemory - totalUsedMemory;
+    } else {
+        host.availableMemory = 0;
+    }
+    
+    if (totalUsedCPUs < host.totalCPUs) {
+        host.availableCPUs = host.totalCPUs - totalUsedCPUs;
+    } else {
+        host.availableCPUs = 0;
+    }
+    
+    // Calculate usage percentages
+    host.cpuUsage = (totalUsedCPUs * 100.0) / host.totalCPUs;
+    host.memoryUsage = (totalUsedMemory * 100.0) / host.totalMemory;
+    
+    // Ensure usage doesn't exceed 100%
+    if (host.cpuUsage > 100.0) host.cpuUsage = 100.0;
+    if (host.memoryUsage > 100.0) host.memoryUsage = 100.0;
     
     return true;
 }
+
 
 json HostManager::checkResourceAvailability(int memory, int cpu, long long disk) {
     json result;

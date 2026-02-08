@@ -4,19 +4,19 @@
 
 // Show Console Modal
 function showConsoleModal() {
-    if (!currentVM) {
+    if (!window.currentVM) {
         showToast('⚠️ Please select a VM first', 'warning');
         return;
     }
     
     const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
+    modal.className = 'modal-overlay active';
     modal.id = 'console-modal';
     
     modal.innerHTML = `
         <div class="modal-content modal-large">
             <div class="modal-header">
-                <h3>🖥️ VM Console - ${currentVM}</h3>
+                <h3>🖥️ VM Console - ${window.currentVM}</h3>
                 <button class="btn-close" onclick="closeConsoleModal()">✖</button>
             </div>
             <div class="modal-body">
@@ -75,7 +75,7 @@ async function loadConsoleInfo() {
     if (!consoleDetails) return;
     
     try {
-        const data = await fetchAPI(`/vms/${currentVM}/vnc`);
+        const data = await window.fetchAPI(`/vms/${window.currentVM}/vnc`);
         
         if (data.success) {
             consoleDetails.innerHTML = `
@@ -116,13 +116,13 @@ async function loadConsoleInfo() {
 
 // Show Snapshot Modal
 function showSnapshotModal() {
-    if (!currentVM) {
+    if (!window.currentVM) {
         showToast('⚠️ Please select a VM first', 'warning');
         return;
     }
     
     const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
+    modal.className = 'modal-overlay active';
     modal.id = 'snapshot-modal';
     
     modal.innerHTML = `
@@ -137,7 +137,7 @@ function showSnapshotModal() {
                         <label>Snapshot Name *</label>
                         <input type="text" id="snapshot-name" required 
                                placeholder="e.g., before-update" 
-                               pattern="[a-zA-Z0-9_-]+" 
+                               pattern="[a-zA-Z0-9-]+" 
                                title="Only letters, numbers, hyphens and underscores">
                     </div>
                     <div class="form-group">
@@ -181,7 +181,7 @@ async function createSnapshot(event) {
     showToast('Creating snapshot...', 'info');
     
     try {
-        const result = await fetchAPI(`/vms/${currentVM}/snapshots`, {
+        const result = await window.fetchAPI(`/vms/${window.currentVM}/snapshots`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -203,13 +203,13 @@ async function createSnapshot(event) {
 
 // Show Clone Modal
 function showCloneModal() {
-    if (!currentVM) {
+    if (!window.currentVM) {
         showToast('⚠️ Please select a VM first', 'warning');
         return;
     }
     
     const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
+    modal.className = 'modal-overlay active';
     modal.id = 'clone-modal';
     
     modal.innerHTML = `
@@ -222,13 +222,13 @@ function showCloneModal() {
                 <div class="modal-body">
                     <div class="form-group">
                         <label>Source VM</label>
-                        <input type="text" value="${currentVM}" disabled>
+                        <input type="text" value="${window.currentVM}" disabled>
                     </div>
                     <div class="form-group">
                         <label>Clone Name *</label>
                         <input type="text" id="clone-name" required 
-                               placeholder="e.g., ${currentVM}-clone" 
-                               pattern="[a-zA-Z0-9_-]+" 
+                               placeholder="e.g., ${window.currentVM}-clone" 
+                               pattern="[a-zA-Z0-9-]+" 
                                title="Only letters, numbers, hyphens and underscores">
                     </div>
                     <div class="info-banner">
@@ -269,7 +269,7 @@ async function cloneVM(event) {
     showToast('Cloning VM...', 'info');
     
     try {
-        const result = await fetchAPI(`/vms/${currentVM}/clone`, {
+        const result = await window.fetchAPI(`/vms/${window.currentVM}/clone`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -290,13 +290,13 @@ async function cloneVM(event) {
 
 // Show Delete VM Modal
 function showDeleteVMModal() {
-    if (!currentVM) {
+    if (!window.currentVM) {
         showToast('⚠️ Please select a VM first', 'warning');
         return;
     }
     
     const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
+    modal.className = 'modal-overlay active';
     modal.id = 'delete-modal';
     
     modal.innerHTML = `
@@ -311,7 +311,7 @@ function showDeleteVMModal() {
                         <span class="warning-icon">⚠️</span>
                         <div>
                             <h4>Warning: This action cannot be undone!</h4>
-                            <p>You are about to delete VM: <strong>${currentVM}</strong></p>
+                            <p>You are about to delete VM: <strong>${window.currentVM}</strong></p>
                         </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px;">
@@ -326,7 +326,7 @@ function showDeleteVMModal() {
                     <div class="form-group">
                         <label>Type VM name to confirm:</label>
                         <input type="text" id="delete-confirm" required 
-                               placeholder="${currentVM}">
+                               placeholder="${window.currentVM}">
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -350,13 +350,20 @@ function closeDeleteVMModal() {
     }
 }
 
+function closeModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) {
+        modal.remove();
+    }
+}
+
 async function deleteVMConfirmed(event) {
     event.preventDefault();
     
     const confirmName = document.getElementById('delete-confirm').value;
     const removeDisks = document.getElementById('remove-disks').checked;
     
-    if (confirmName !== currentVM) {
+    if (confirmName !== window.currentVM) {
         showToast('❌ VM name does not match', 'error');
         return;
     }
@@ -366,13 +373,13 @@ async function deleteVMConfirmed(event) {
     showToast('Deleting VM...', 'info');
     
     try {
-        const result = await fetchAPI(`/vms/${currentVM}?removeDisks=${removeDisks}`, {
+        const result = await window.fetchAPI(`/vms/${window.currentVM}?removeDisks=${removeDisks}`, {
             method: 'DELETE'
         });
         
         if (result.success) {
             showToast('✅ VM deleted successfully!', 'success');
-            currentVM = null;
+            window.currentVM = null;
             await loadVMs();
         } else {
             showToast(`❌ Failed to delete VM: ${result.error || 'Unknown error'}`, 'error');
@@ -394,10 +401,13 @@ function copyToClipboard(text) {
 
 window.showConsoleModal = showConsoleModal;
 window.closeConsoleModal = closeConsoleModal;
+window.openVNCConsole = openVNCConsole;
+window.loadConsoleInfo = loadConsoleInfo;
 window.showSnapshotModal = showSnapshotModal;
 window.closeSnapshotModal = closeSnapshotModal;
 window.createSnapshot = createSnapshot;
 window.showCloneModal = showCloneModal;
+window.closeModal = closeModal;
 window.closeCloneModal = closeCloneModal;
 window.cloneVM = cloneVM;
 window.showDeleteVMModal = showDeleteVMModal;

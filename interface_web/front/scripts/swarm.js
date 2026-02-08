@@ -145,7 +145,7 @@ function showCreateSwarmModal() {
                         <span class="warning-icon">⚠️</span>
                         <div>
                             <p><strong>Resource Requirements:</strong></p>
-                            <p>Each node: 2 vCPU, 2GB RAM, 20GB Disk</p>
+                            <p>Each node: 1 vCPU, 1GB RAM, 5GB Disk</p>
                             <p id="total-requirements"></p>
                         </div>
                     </div>
@@ -168,11 +168,16 @@ function showCreateSwarmModal() {
     const updateReqs = () => {
         const total = parseInt(managersSelect.value) + parseInt(workersInput.value);
         document.getElementById('total-requirements').textContent = 
-            `Total: ${total} nodes (${total * 2} vCPU, ${total * 2}GB RAM, ${total * 20}GB Disk)`;
+            `Total: ${total} nodes (${total * 1} vCPU, ${total * 1}GB RAM, ${total * 10}GB Disk)`;
     };
     managersSelect.addEventListener('change', updateReqs);
     workersInput.addEventListener('input', updateReqs);
     updateReqs();
+
+
+    // setTimeout(() => {
+    //     showToast('✅ Swarm cluster created successfully!', 'success');
+    // }, 30000);
 }
 
 function closeCreateSwarmModal() {
