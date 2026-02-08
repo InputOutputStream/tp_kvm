@@ -196,7 +196,7 @@ json PaaSOperations::deployApplication(const json& appConfig) {
             return result;
         }
         
-        std::string selectedHost = hostSelection["host"];
+        std::string selectedHost = hostSelection["hostId"];
         result["selectedHost"] = selectedHost;
         
         // Update remote executor to use selected host

@@ -146,7 +146,6 @@ void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res)
     
     res.set_content(result.dump(), "application/json");
 }
-
 void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {
     try {
         auto body = json::parse(req.body);
@@ -159,29 +158,21 @@ void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response&
             return;
         }
 
-        std::string username = body["username"];
-        std::string password = body["password"];
-        std::string email = body.value("email", "");
-        std::string role = body.value("role", "user"); // Default to standard user
-        std::string firstName = body.value("firstName", "");
-        std::string lastName = body.value("lastName", "");
-        std::string networkName = body.value("networkName", "");
-
-        // Create User via UserOperations
-        if (userOps->createUser(body)) {
-            networkMgr->createUserNetwork(username, "net_" + username); 
-            
+        // Create User via UserOperations - GET THE JSON RESULT
+        json result = userOps->createUser(body);
+        
+        // Check the "success" field in the JSON
+        if (result["success"].get<bool>()) {
             res.status = 201;
-            json result = {{"success", true}, {"message", "User registered successfully"}};
-            res.set_content(result.dump(), "application/json");
+            json response = {{"success", true}, {"message", "User registered successfully"}};
+            res.set_content(response.dump(), "application/json");
         } else {
             res.status = 409; // Conflict
-            json result = {{"success", false}, {"error", "User already exists or creation failed"}};
             res.set_content(result.dump(), "application/json");
         }
     } catch (const std::exception& e) {
         res.status = 400;
-        json result = {{"success", false}, {"error", "Invalid JSON format"}};
+        json result = {{"success", false}, {"error", std::string("Invalid request: ") + e.what()}};
         res.set_content(result.dump(), "application/json");
     }
 }
