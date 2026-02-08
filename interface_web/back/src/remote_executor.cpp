@@ -6,6 +6,7 @@
 #include <sys/statvfs.h>
 #include <iostream>
 #include <sys/stat.h>
+#include <cstdlib>
 
 namespace RemoteExec {
 
@@ -57,6 +58,7 @@ std::string RemoteExecutor::findDefaultSSHKey() const {
         std::string(home) + "/.ssh/thoth_kvm_key",
         std::string(home) + "/.ssh/id_rsa",
         std::string(home) + "/.ssh/id_ed25519",
+        std::string(home) + "/.ssh/id_ecdsa",
     };
     
     for (const auto& keyPath : possibleKeys) {
@@ -89,9 +91,21 @@ std::string RemoteExecutor::buildSSHCommand(const std::string& command) const {
     ssh << "-o ConnectTimeout=10 ";
     ssh << "-o BatchMode=yes ";  // Fail if password is required
     ssh << "-o PasswordAuthentication=no ";  // Don't ask for password
+    ssh << "-o LogLevel=ERROR ";  // Reduce noise in output
     
     ssh << remoteUser << "@" << remoteHost << " ";
-    ssh << "'" << command << "'";
+    
+    // Properly escape the command for remote execution
+    std::string escapedCommand = command;
+    // Escape single quotes in the command
+
+    size_t pos = 0;
+    while ((pos = escapedCommand.find("'", pos)) != std::string::npos) {
+        escapedCommand.replace(pos, 1, "'\\''");
+        pos += 4;
+    }
+    
+    ssh << "'" << escapedCommand << "'";
     
     return ssh.str();
 }
@@ -99,7 +113,7 @@ std::string RemoteExecutor::buildSSHCommand(const std::string& command) const {
 RemoteExecutor::ExecResult RemoteExecutor::execute(const std::string& command) const {
     ExecResult result;
     
-    std::string fullCommand = buildSSHCommand(command);
+    std::string fullCommand = "timeout 5 " + buildSSHCommand(command);
     fullCommand += " 2>&1";  // Capture stderr too
     
     FILE* pipe = popen(fullCommand.c_str(), "r");
@@ -114,38 +128,80 @@ RemoteExecutor::ExecResult RemoteExecutor::execute(const std::string& command) c
         result.output += buffer;
     }
     
-    result.exitCode = pclose(pipe);
-    // pclose returns the exit status shifted left by 8 bits
-    result.exitCode = WEXITSTATUS(result.exitCode);
+    int status = pclose(pipe);
+    
+    // Check if pclose failed
+    if (status == -1) {
+        result.exitCode = -1;
+        result.output += "\nError: pclose failed";
+        return result;
+    }
+    
+    // Extract the actual exit status
+    if (WIFEXITED(status)) {
+        result.exitCode = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        result.exitCode = 128 + WTERMSIG(status);
+        result.output += "\nProcess terminated by signal: " + std::to_string(WTERMSIG(status));
+    } else {
+        result.exitCode = -1;
+        result.output += "\nUnknown process termination";
+    }
     
     return result;
 }
 
 bool RemoteExecutor::fileExists(const std::string& path) const {
+    if (!isRemote) {
+        struct stat buffer;
+        return (stat(path.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode));
+    }
+    
     std::string cmd = "test -f \"" + path + "\"";
     auto result = execute(cmd);
     return result.success();
 }
 
 bool RemoteExecutor::directoryExists(const std::string& path) const {
+    if (!isRemote) {
+        struct stat buffer;
+        return (stat(path.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode));
+    }
+    
     std::string cmd = "test -d \"" + path + "\"";
     auto result = execute(cmd);
     return result.success();
 }
 
-
-long long RemoteExecutor::getAvailableDiskSpace(const std::string& path) const{
-    struct statvfs stat;
-    
-    if (statvfs(path.c_str(), &stat) != 0) {
-        std::cerr << "Failed to get disk space for path: " << path << std::endl;
-        return -1;
+long long RemoteExecutor::getAvailableDiskSpace(const std::string& path) const {
+    if (!isRemote) {
+        struct statvfs stat;
+        
+        if (statvfs(path.c_str(), &stat) != 0) {
+            std::cerr << "Failed to get disk space for path: " << path << std::endl;
+            return -1;
+        }
+        
+        // Calculate free space in bytes: free blocks * block size
+        unsigned long long freeBytes = static_cast<unsigned long long>(stat.f_bavail) * stat.f_frsize;
+        
+        return static_cast<long long>(freeBytes);
     }
     
-    // Calculate free space in bytes: free blocks * block size
-    unsigned long long freeBytes = static_cast<unsigned long long>(stat.f_bavail) * stat.f_frsize;
+    // For remote hosts, use df command
+    std::string cmd = "df -B1 \"" + path + "\" | tail -1 | awk '{print $4}'";
+    auto result = execute(cmd);
     
-    return static_cast<long long>(freeBytes);
+    if (result.success() && !result.output.empty()) {
+        try {
+            return std::stoll(result.output);
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to parse disk space: " << e.what() << std::endl;
+            return -1;
+        }
+    }
+    
+    return -1;
 }
 
 bool RemoteExecutor::commandExists(const std::string& command) const {

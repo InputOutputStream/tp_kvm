@@ -493,11 +493,11 @@ std::string HostManager::selectByBestFit(int mem, int cpu, long long disk) {
 std::string HostManager::findBestHost(int requiredMemory, int requiredCPU, 
                                      long long requiredDisk,
                                      HostSelectionStrategy customStrategy) {
-    HostSelectionStrategy strategyToUse = customStrategy;
-    
-    // If no custom strategy specified, use the configured one
-    if (customStrategy == strategy) {
-        strategyToUse = strategy;
+
+    HostSelectionStrategy strategyToUse = strategy; 
+    // Only override if a specific valid strategy is passed
+    if (customStrategy != HostSelectionStrategy::UNKNOWN) { 
+        strategyToUse = customStrategy;
     }
     
     switch(strategyToUse) {

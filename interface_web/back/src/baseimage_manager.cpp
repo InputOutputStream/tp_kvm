@@ -58,24 +58,6 @@ std::string BaseImageManager::extractArchitecture(const std::string& filename) {
     return "amd64"; // Default assumption
 }
 
-long long BaseImageManager::getFileSize(const std::string& path) {
-    if (!remoteExec) return 0;
-    
-    std::string cmd = "stat -c%s \"" + path + "\" 2>/dev/null";
-    auto result = remoteExec->execute(cmd);
-    
-    if (!result.success()) {
-        return 0;
-    }
-    
-    try {
-        std::string output = result.output;
-        output.erase(output.find_last_not_of("\n\r") + 1);
-        return std::stoll(output);
-    } catch (...) {
-        return 0;
-    }
-}
 
 BaseImage BaseImageManager::parseImageInfo(const std::string& filename, const std::string& fullPath) {
     BaseImage img;
@@ -178,6 +160,40 @@ json BaseImageManager::listImages() {
     result["count"] = result["images"].size();
     
     return result;
+}
+
+bool BaseImageManager::isValidPath(const std::string& path) {
+    // Prevent path traversal
+    if (path.find("..") != std::string::npos) return false;
+    if (path.find("~") != std::string::npos) return false;
+    return path.find(baseImageDir) == 0;
+}
+
+// Fix getFileSize with better error handling
+long long BaseImageManager::getFileSize(const std::string& path) {
+    if (!isValidPath(path)) {
+        std::cerr << "Invalid path detected: " << path << std::endl;
+        return -1;
+    }
+    
+    if (!remoteExec) return -1;
+    
+    std::string cmd = "stat -c%s \"" + path + "\" 2>/dev/null";
+    auto result = remoteExec->execute(cmd);
+    
+    if (!result.success() || result.output.empty()) {
+        return -1;
+    }
+    
+    try {
+        std::string output = result.output;
+        output.erase(std::remove_if(output.begin(), output.end(), ::isspace), 
+                    output.end());
+        return std::stoll(output);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to parse file size: " << e.what() << std::endl;
+        return -1;
+    }
 }
 
 json BaseImageManager::getImage(const std::string& imageId) {

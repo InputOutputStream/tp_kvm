@@ -10,30 +10,6 @@
 using json = nlohmann::json;
 
 
-UserContext getUserContext(const httplib::Request& req, UserOperations* userOps) {
-    UserContext ctx;
-    
-    std::string authHeader = req.get_header_value("Authorization");    
-    if (authHeader.find("Bearer ") == 0) {
-        std::string token = authHeader.substr(7);
-        
-        std::string username, role;
-        if (userOps->validateToken(token, username, role)) {
-            ctx.userId = username;
-            ctx.role = role;
-            ctx.isAdmin = (role == "admin");
-            ctx.is_auth = true;
-            return ctx;
-        } else {
-            std::cerr << "Token validation failed" << std::endl;
-        }
-    } else {
-        std::cerr << "No Bearer token found" << std::endl;
-    }
-    
-    return ctx; // Returns with is_auth = false
-}
-
 // Check if user has access to VM
 bool checkVMAccess(const std::string& vmName, const UserContext& userCtx) {
     if (userCtx.isAdmin) return true;
@@ -41,698 +17,502 @@ bool checkVMAccess(const std::string& vmName, const UserContext& userCtx) {
     VMNameManager manager;
     return manager.isOwner(vmName, userCtx.userId);
 }
+
+// Add authentication middleware
+UserContext APIRoutes::extractUserContext(const httplib::Request& req) {
+    UserContext ctx;
     
-void APIRoutes::setup(httplib::Server& svr) {
-    // httplib::Logger& lg;
-
-    // fprintf(stderr, "%s", svr.set_logger(lg))
-
-    svr.Get("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
-        // Admin only
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.isAdmin) {
-            res.status = 403;
-            return;
+    std::string token = req.get_header_value("Authorization");
+    if (token.empty()) {
+        // Try cookie
+        auto cookie = req.get_header_value("Cookie");
+        if (!cookie.empty()) {
+            // Extract token from cookie
+            size_t pos = cookie.find("token=");
+            if (pos != std::string::npos) {
+                token = cookie.substr(pos + 6);
+                size_t end = token.find(';');
+                if (end != std::string::npos) {
+                    token = token.substr(0, end);
+                }
+            }
         }
-        
-        json result = manager->listHosts();
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Post("/api/hosts", [this](const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.isAdmin) {
-            res.status = 403;
-            return;
-        }
-        
-        json body = json::parse(req.body);
-        bool success = manager->addHost(body["uri"]);
-        
-        json result = {{"success", success}};
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Get("/api/auth/validate", [this](const httplib::Request& req, httplib::Response& res) {
-        std::string authHeader = req.get_header_value("Authorization");
-        
-        if (authHeader.find("Bearer ") != 0) {
-            res.status = 401;
-            json error = {{"success", false}, {"error", "Invalid authorization header"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        std::string token = authHeader.substr(7);
-        std::string username, role;
-        
-        if (userOps->validateToken(token, username, role)) {
-            json result = {
-                {"success", true},
-                {"user", {
-                    {"username", username},
-                    {"role", role}
-                }}
-            };
-            res.set_content(result.dump(), "application/json");
-        } else {
-            res.status = 401;
-            json error = {{"success", false}, {"error", "Invalid or expired token"}};
-            res.set_content(error.dump(), "application/json");
-        }
-    });
-
-    svr.Get("/api/hosts/stats", [this](const httplib::Request& req __attribute__((unused)), httplib::Response& res) {
-        json result = manager->getAllHostsStats();
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // Login and Auth
-    svr.Post("/api/auth/login", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleLogin(req, res);
-    });
-
-    svr.Post("/api/auth/register", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleCreateUser(req, res);
-    });
-
-    // VM listing
-    svr.Get("/api/vms", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleListVMs(req, res);
-    });
+    }
     
-    // VM info
-    svr.Get(R"(/api/vms/([^/]+)$)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleGetVMInfo(req, res);
-    });
+    // Remove "Bearer " prefix if present
+    if (token.find("Bearer ") == 0) {
+        token = token.substr(7);
+    }
     
-    // VM status
-    svr.Get(R"(/api/vms/([^/]+)/status)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleGetVMStatus(req, res);
-    });
+    std::string username, role;
+    if (userOps->validateToken(token, username, role)) {
+        ctx.userId = username;
+        ctx.role = role;
+        ctx.isAdmin = (role == "admin");
+        ctx.is_auth = true;
+    }
     
-    // VM stats
-    svr.Get(R"(/api/vms/([^/]+)/stats)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleGetVMStats(req, res);
-    });
-
-    // VM Create
-    svr.Post(R"(/api/vms/deploy)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleDeployVM(req, res);
-    });
-    
-    // VM control
-    svr.Post(R"(/api/vms/([^/]+)/start)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleStartVM(req, res);
-    });
-
-    svr.Post(R"(/api/vms/([^/]+)/shutdown)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleShutdownVM(req, res);
-    });
-    
-    svr.Post(R"(/api/vms/([^/]+)/destroy)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleDestroyVM(req, res);
-    });
-    
-    svr.Post(R"(/api/vms/([^/]+)/reboot)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleRebootVM(req, res);
-    });
-    
-    svr.Post(R"(/api/vms/([^/]+)/pause)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handlePauseVM(req, res);
-    });
-    
-    svr.Post(R"(/api/vms/([^/]+)/resume)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleResumeVM(req, res);
-    });
-
-    svr.Delete(R"(/api/vms/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleDeleteVM(req, res);
-    });
-    
-    // VNC
-    svr.Get(R"(/api/vms/([^/]+)/vnc)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleGetVNC(req, res);
-    });
-
-    // IP
-    
-    svr.Get(R"(/api/vms/([^/]+)/ip)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleGetIP(req, res);
-    });
-
-    
-    // Snapshots
-    svr.Get(R"(/api/vms/([^/]+)/snapshots)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleListSnapshots(req, res);
-    });
-    
-    svr.Post(R"(/api/vms/([^/]+)/snapshots)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleCreateSnapshot(req, res);
-    });
-    
-    svr.Post(R"(/api/vms/([^/]+)/snapshots/([^/]+)/revert)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleRevertSnapshot(req, res);
-    });
-    
-    svr.Delete(R"(/api/vms/([^/]+)/snapshots/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleDeleteSnapshot(req, res);
-    });
-    
-    // Clone
-    svr.Post(R"(/api/vms/([^/]+)/clone)", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleCloneVM(req, res);
-    });
-    
-    // System info
-    svr.Get("/api/system/info", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleSystemInfo(req, res);
-    });
-
-    // User management routes (admin only)
-    svr.Get("/api/users", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleListUsers(req, res);
-    });
-
-    svr.Post("/api/users", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleCreateUser(req, res);
-    });
-    svr.Put("/api/users/:username", [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleUpdateUser(req, res);
-        });
-    svr.Delete("/api/users/:username", [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleDeleteUser(req, res);
-        });
-    svr.Get("/api/users/:username/usage", [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleGetUserUsage(req, res);
-        });
-    
-    svr.Get("/api/users/usage/all", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        
-        if (!userCtx.isAdmin) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Admin access required"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json result = userOps->getAllUsersUsage();
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // PaaS routes
-    svr.Post("/api/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        json body = json::parse(req.body);
-        
-        json result = paasOps->deployApplication(body);
-        
-        if (!result["success"].get<bool>()) {
-            res.status = 500;
-        }
-        
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Get("/api/paas/apps", [this](const httplib::Request& req __attribute__((unused)), httplib::Response& res) {
-        json result = paasOps->listApplications();
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Post("/paas/select-host", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handlePaaSSelectHost(req, res);
-    });
-    
-    svr.Post("/paas/deploy", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handlePaaSDeploy(req, res);
-    });
-    
-    svr.Get("/paas/apps/:name/details", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handlePaaSAppDetails(req, res);
-    });
-    
-    svr.Post("/paas/apps/:name/migrate", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handlePaaSMigrate(req, res);
-    });
-
-    svr.Delete("/api/paas/apps/:appId", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        std::string appId = req.matches[1];
-        
-        bool success = paasOps->deleteApplication(appId);
-        
-        json result = {{"success", success}};
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // Deploy OnlyOffice for user
-    svr.Post("/api/documents/deploy", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        json result = paasOps->deployOnlyOffice(userCtx.userId);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // Get OnlyOffice URL
-    svr.Get("/api/documents/url", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        json result = paasOps->getOnlyOfficeURL(userCtx.userId);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // Delete OnlyOffice instance
-    svr.Delete("/api/documents", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        bool success = paasOps->deleteOnlyOffice(userCtx.userId);
-        json result = {{"success", success}};
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // Flavors
-    svr.Get("/api/flavors", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleListFlavors(req, res); 
-    });
-
-    // Base images  
-    svr.Get("/api/images", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleListImages(req, res);
-     });
-
-    // Networks
-    svr.Get("/api/networks/mine", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        json result = networkMgr->getUserNetworks(userCtx.userId);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Get("/api/networks", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleListAllNetworks(req, res);
-     });
-    svr.Post("/api/networks/user", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleCreateNetwork(req, res);
-     });
-
-    svr.Get("/api/networks", [this](const auto& req, auto& res) {
-        this->handleListAllNetworks(req, res);
-    });
-    
-    svr.Get("/api/networks/user", [this](const auto& req, auto& res) {
-        this->handleListUserNetworks(req, res);
-    });
-    
-    svr.Post("/api/networks/user", [this](const auto& req, auto& res) {
-        this->handleCreateNetwork(req, res);
-    });
-    
-    svr.Get(R"(/api/networks/([a-zA-Z0-9_-]+))", [this](const auto& req, auto& res) {
-        this->handleGetNetwork(req, res);
-    });
-    
-    svr.Patch(R"(/api/networks/([a-zA-Z0-9_-]+))", [this](const auto& req, auto& res) {
-        this->handleUpdateNetwork(req, res);
-    });
-    
-    svr.Delete(R"(/api/networks/user/([a-zA-Z0-9_-]+))", [this](const auto& req, auto& res) {
-        this->handleDeleteNetwork(req, res);
-    });
-
-    // Swarm clusters
-    svr.Post("/api/swarm/clusters", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleCreateCluster(req, res);
-    });
-    svr.Get("/api/swarm/clusters", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleListClusters(req, res);
-     });
-    svr.Get("/api/swarm/clusters/:id", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleGetCluster(req, res);
-     });
-    svr.Delete("/api/swarm/clusters/:id", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleDeleteCluster(req, res);
-     });
-
-    // Host strategy
-    svr.Put("/api/hosts/strategy", [this](const httplib::Request& req, httplib::Response& res) { 
-        this->handleSetHostSelectionStrategy(req, res);
-     });
-
-      // Database provisioning
-    svr.Post("/api/paas/database", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleProvisionDatabase(req, res);
-    });
-    
-    // SaaS billing
-    svr.Get("/api/saas/billing", [this](const httplib::Request& req, httplib::Response& res) {
-        this->handleGetSaaSBilling(req, res);
-    });
-    
-
-    // PaaS monitoring endpoints
-    svr.Get("/api/paas/database/credentials", 
-        [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleGetDatabaseCredentials(req, res);
-        });
-
-    svr.Get(R"(/api/paas/apps/([^/]+)/logs)", 
-        [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleGetAppLogs(req, res);
-        });
-
-    svr.Get(R"(/api/paas/apps/([^/]+)/stats)", 
-        [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleGetAppStats(req, res);
-        });
-
-    svr.Post(R"(/api/paas/apps/([^/]+)/stop)", 
-        [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleStopApp(req, res);
-        });
-
-    svr.Post(R"(/api/paas/apps/([^/]+)/start)", 
-        [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleStartApp(req, res);
-        });
-
-    svr.Post("/api/paas/database", 
-        [this](const httplib::Request& req, httplib::Response& res) {
-            this->handleProvisionDatabase(req, res);
-        });
-
-    svr.Post("/api/paas/select-host", [this](auto& req, auto& res) {
-        handlePaaSSelectHost(req, res);
-    });
-
-    svr.Post("/api/paas/deploy", [this](auto& req, auto& res) {
-        handlePaaSDeploy(req, res);
-    });
-
-    svr.Get("/api/paas/applications", [this](auto& req, auto& res) {
-        handleListPaaSApplications(req, res);
-    });
-
-    svr.Get(R"(/api/paas/applications/([^/]+)/status)", [this](auto& req, auto& res) {
-        handlePaaSAppDetails(req, res);
-    });
-
-    svr.Delete(R"(/api/paas/applications/([^/]+))", [this](auto& req, auto& res) {
-        handleDeletePaaSApp(req, res);
-    });
-
-    svr.Post(R"(/api/paas/applications/([^/]+)/migrate)", [this](auto& req, auto& res) {
-        handlePaaSMigrate(req, res);
-    });
-
-    svr.Get("/api/paas/server-info", [this](auto& req, auto& res) {
-        handlePaaSServerInfo(req, res);
-    });
-
-    // Host routes (for multi-host features)
-    svr.Get("/api/hosts", [this](auto& req, auto& res) {
-        handleGetAvailableHosts(req, res);
-    });
-
-    svr.Get(R"(/api/hosts/([^/]+))", [this](auto& req, auto& res) {
-        handleGetHostDetails(req, res);
-    });
-
-    svr.Get("/api/hosts/available", [this](auto& req, auto& res) {
-        handleGetHostsAvailableForMigration(req, res);
-    });
-
-
-    // ========================================
-    // VNC CONSOLE ROUTES
-    // ========================================
-
-    svr.Get("/api/vms/:name/vnc", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            json error = {{"success", false}, {"error", "Unauthorized"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        std::string vmName = req.path_params.at("name");
-        
-        if (!checkVMAccess(vmName, userCtx)) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Access denied"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json result = vncHandler->getVNCInfo(vmName);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Post("/api/vms/:name/vnc/enable", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string vmName = req.path_params.at("name");
-        
-        if (!checkVMAccess(vmName, userCtx)) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Access denied"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json body = json::parse(req.body);
-        std::string password = body.value("password", "");
-        
-        json result = vncHandler->enableVNC(vmName, password);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Get("/api/vnc/status", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        json result = vncHandler->getNoVNCStatus();
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // ========================================
-    // PORT FORWARDING & NETWORK ROUTES
-    // ========================================
-
-    svr.Get("/api/vms/:name/ip", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string vmName = req.path_params.at("name");
-        
-        if (!checkVMAccess(vmName, userCtx)) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Access denied"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json result = vmOps->getVMIP(vmName);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Post("/api/vms/:name/forward", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string vmName = req.path_params.at("name");
-        
-        if (!checkVMAccess(vmName, userCtx)) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Access denied"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json body = json::parse(req.body);
-        int vmPort = body["vmPort"];
-        int hostPort = body.value("hostPort", 0);
-        std::string protocol = body.value("protocol", "tcp");
-        
-        json result = vmOps->createPortForward(vmName, vmPort, hostPort, protocol);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Get("/api/vms/:name/forwards", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string vmName = req.path_params.at("name");
-        
-        if (!checkVMAccess(vmName, userCtx)) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Access denied"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json result = vmOps->listPortForwards(vmName);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Delete("/api/vms/:name/forward/:id", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string vmName = req.path_params.at("name");
-        std::string forwardId = req.path_params.at("id");
-        
-        if (!checkVMAccess(vmName, userCtx)) {
-            res.status = 403;
-            json error = {{"success", false}, {"error", "Access denied"}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        
-        json result = vmOps->deletePortForward(vmName, forwardId);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // ========================================
-    // PAAS ACCESS & NETWORKING ROUTES
-    // ========================================
-
-    svr.Get("/api/paas/apps/:id/access", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string appId = req.path_params.at("id");
-        
-        // Check if user owns this app
-        // TODO: Implement app ownership check
-        
-        json result = paasOps->getApplicationAccessInfo(appId);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Post("/api/paas/apps/:id/proxy", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string appId = req.path_params.at("id");
-        json body = json::parse(req.body);
-        std::string domain = body["domain"];
-        
-        json result = paasOps->setupReverseProxy(appId, domain);
-        res.set_content(result.dump(), "application/json");
-    });
-
-    svr.Post("/api/paas/apps/:id/ssl", [this](const httplib::Request& req, httplib::Response& res) {
-        auto userCtx = getUserContext(req, userOps);
-        if (!userCtx.is_auth) {
-            res.status = 401;
-            return;
-        }
-        
-        std::string appId = req.path_params.at("id");
-        json body = json::parse(req.body);
-        std::string domain = body["domain"];
-        std::string email = body["email"];
-        
-        json result = paasOps->enableSSL(appId, domain, email);
-        res.set_content(result.dump(), "application/json");
-    });
-
-
+    return ctx;
 }
 
-void APIRoutes::handleLogin(const httplib::Request& req, httplib::Response& res) {
-    json body;
-    try {
-        body = json::parse(req.body);
-    } catch (const std::exception& e) {
-        res.status = 400;
-        json error = {{"success", false}, {"error", "Invalid JSON"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
+// Add authentication check wrapper
+bool APIRoutes::requireAuth(const httplib::Request& req, 
+                           httplib::Response& res,
+                           UserContext& ctx) {
+    ctx = extractUserContext(req);
     
-    if (!body.contains("username") || !body.contains("password")) {
-        res.status = 400;
-        json error = {{"success", false}, {"error", "Username and password required"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    
-    json result = userOps->authenticate(
-        body["username"].get<std::string>(),
-        body["password"].get<std::string>()
-    );
-
-    std::cerr << "Login result: " << result.dump() << std::endl;  
-    
-    if (!result["success"].get<bool>()) {
+    if (!ctx.is_auth) {
+        json error = {
+            {"success", false},
+            {"error", "Authentication required"}
+        };
         res.status = 401;
+        res.set_content(error.dump(), "application/json");
+        return false;
     }
     
-    res.set_content(result.dump(), "application/json");
+    return true;
 }
 
-// Routes Handler definitions
+bool APIRoutes::requireAdmin(const httplib::Request& req,
+                            httplib::Response& res,
+                            UserContext& ctx) {
+    if (!requireAuth(req, res, ctx)) {
+        return false;
+    }
+    
+    if (!ctx.isAdmin) {
+        json error = {
+            {"success", false},
+            {"error", "Administrator privileges required"}
+        };
+        res.status = 403;
+        res.set_content(error.dump(), "application/json");
+        return false;
+    }
+    
+    return true;
+}
+
 void APIRoutes::handleListVMs(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req, userOps);
+    UserContext ctx;
+    if (!requireAuth(req, res, ctx)) return;
     
     json result;
-    if (userCtx.isAdmin) {
-        result = vmOps->listAllVMs();
+    try {
+        if (ctx.isAdmin) {
+            result = vmOps->listAllVMs();
+        } else {
+            result = vmOps->listUserVMs(ctx.userId);
+        }
+        
+        res.set_content(result.dump(), "application/json");
+    } catch (const std::exception& e) {
+        // Don't expose internal error details
+        json error = {
+            {"success", false},
+            {"error", "Internal server error"}
+        };
+        res.status = 500;
+        res.set_content(error.dump(), "application/json");
+        
+        // Log the actual error internally
+        std::cerr << "Error in handleListVMs: " << e.what() << std::endl;
+    }
+}
+
+bool APIRoutes::validateVMName(const std::string& name) {
+    if (name.empty() || name.length() > 100) return false;
+    
+    // Only allow alphanumeric, hyphens, underscores
+    static const std::regex valid_pattern(R"(^[a-zA-Z0-9_-]+$)");
+    return std::regex_match(name, valid_pattern);
+}
+
+/**
+ * @brief Send unauthorized response
+ */
+void sendUnauthorized(httplib::Response& res, const std::string& message = "Unauthorized") {
+    json response = {
+        {"success", false},
+        {"error", message},
+        {"code", 401}
+    };
+    res.set_content(response.dump(), "application/json");
+    res.status = 401;
+}
+
+/**
+ * @brief Send forbidden response
+ */
+void sendForbidden(httplib::Response& res, const std::string& message = "Access denied") {
+    json response = {
+        {"success", false},
+        {"error", message},
+        {"code", 403}
+    };
+    res.set_content(response.dump(), "application/json");
+    res.status = 403;
+}
+
+/**
+ * @brief Send error response
+ */
+void sendError(httplib::Response& res, const std::string& message, int code = 400) {
+    json response = {
+        {"success", false},
+        {"error", message},
+        {"code", code}
+    };
+    res.set_content(response.dump(), "application/json");
+    res.status = code;
+}
+
+
+void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    try {
+        json vmParams = json::parse(req.body);
+        
+        // CRITICAL: Force username to be the authenticated user
+        // Users cannot deploy VMs for other users
+        vmParams["username"] = ctx.userId;
+        
+        // Validate required fields
+        if (!vmParams.contains("vmName") || !vmParams.contains("flavor")) {
+            sendError(res, "Missing required fields: vmName, flavor");
+            return;
+        }
+        
+        // Deploy VM
+        bool success = vmOps->deployVM(vmParams);
+        
+        json result;
+        if (success) {
+            result["success"] = true;
+            result["message"] = "VM deployment initiated";
+            
+            // Log the action
+            Rlogger->logUserAction(ctx.userId, "deploy_vm", 
+                                  vmParams["vmName"].get<std::string>(), true);
+        } else {
+            result["success"] = false;
+            result["error"] = "VM deployment failed";
+            
+            Rlogger->logUserAction(ctx.userId, "deploy_vm", 
+                                  vmParams["vmName"].get<std::string>(), false);
+        }
+        
+        res.set_content(result.dump(), "application/json");
+        
+    } catch (const json::exception& e) {
+        sendError(res, std::string("Invalid JSON: ") + e.what());
+    }
+}
+
+void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    // Get resource ID from URL parameter
+    std::string resourceID = req.matches[1];
+    
+    // Attempt to start VM (ownership checked in vmOps)
+    bool success = vmOps->startVM(resourceID, ctx.userId);
+    
+    json result;
+    if (success) {
+        result["success"] = true;
+        result["message"] = "VM started successfully";
+        Rlogger->logUserAction(ctx.userId, "start_vm", resourceID, true);
     } else {
-        result = vmOps->listUserVMs(userCtx.userId);
+        result["success"] = false;
+        result["error"] = "Failed to start VM or access denied";
+        Rlogger->logUserAction(ctx.userId, "start_vm", resourceID, false);
     }
     
     res.set_content(result.dump(), "application/json");
 }
+
+void APIRoutes::handleShutdownVM(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    std::string resourceID = req.matches[1];
+    
+    bool success = vmOps->shutdownVM(resourceID, ctx.userId);
+    
+    json result;
+    if (success) {
+        result["success"] = true;
+        result["message"] = "VM shutdown initiated";
+        Rlogger->logUserAction(ctx.userId, "shutdown_vm", resourceID, true);
+    } else {
+        result["success"] = false;
+        result["error"] = "Failed to shutdown VM or access denied";
+        Rlogger->logUserAction(ctx.userId, "shutdown_vm", resourceID, false);
+    }
+    
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    std::string resourceID = req.matches[1];
+    
+    // Check if user wants to remove disks
+    bool removeDisks = req.has_param("removeDisks") && 
+                      req.get_param_value("removeDisks") == "true";
+    
+    json result = vmOps->deleteVM(resourceID, ctx.userId, removeDisks);
+    
+    if (result["success"].get<bool>()) {
+        Rlogger->logUserAction(ctx.userId, "delete_vm", resourceID, true);
+    } else {
+        Rlogger->logUserAction(ctx.userId, "delete_vm", resourceID, false);
+    }
+    
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleGetIP(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    std::string resourceID = req.matches[1];
+    
+    json result = vmOps->getVMIP(resourceID, ctx.userId);
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleGetVNC(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    std::string resourceID = req.matches[1];
+    
+    json result = vmOps->getVNCInfo(resourceID, ctx.userId);
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleCreatePortForward(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    try {
+        json params = json::parse(req.body);
+        
+        std::string resourceID = req.matches[1];
+        int vmPort = params["vmPort"].get<int>();
+        std::string protocol = params.value("protocol", "tcp");
+        
+        json result = vmOps->createPortForward(resourceID, ctx.userId, vmPort, protocol);
+        res.set_content(result.dump(), "application/json");
+        
+    } catch (const json::exception& e) {
+        sendError(res, std::string("Invalid JSON: ") + e.what());
+    }
+}
+
+void APIRoutes::handleListPortForwards(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    json result = vmOps->listPortForwards(ctx.userId);
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleDeletePortForward(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    std::string forwardID = req.matches[1];
+    
+    bool success = vmOps->deletePortForward(forwardID, ctx.userId);
+    
+    json result;
+    if (success) {
+        result["success"] = true;
+        result["message"] = "Port forward deleted";
+    } else {
+        result["success"] = false;
+        result["error"] = "Failed to delete port forward or access denied";
+    }
+    
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleUpdateVMMetadata(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    try {
+        std::string resourceID = req.matches[1];
+        json updates = json::parse(req.body);
+        
+        // Users can only update displayName and tags
+        json allowedUpdates;
+        if (updates.contains("displayName")) {
+            allowedUpdates["displayName"] = updates["displayName"];
+        }
+        if (updates.contains("tags")) {
+            allowedUpdates["tags"] = updates["tags"];
+        }
+        
+        json result = vmOps->updateVMMetadata(resourceID, ctx.userId, allowedUpdates);
+        res.set_content(result.dump(), "application/json");
+        
+    } catch (const json::exception& e) {
+        sendError(res, std::string("Invalid JSON: ") + e.what());
+    }
+}
+
+void APIRoutes::handleActionVM(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    if (!ctx.is_auth) { sendUnauthorized(res); return; }
+
+    std::string resourceID = req.matches[1]; // /api/vms/:id/action
+    
+    // Check ownership inside vmOps methods or here via MetadataStore
+    // vmOps->performAction checks ownership now
+    json body = json::parse(req.body);
+    std::string action = body["action"];
+    
+    bool result = vmOps->performVMAction(resourceID, ctx.userId, action);
+    
+    if (result) {
+        res.set_content("{\"success\": true}", "application/json");
+    } else {
+        sendError(res, "Action failed or access denied", 403);
+    }
+}
+
+
+void APIRoutes::handleCreateNetwork(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    try {
+        json params = json::parse(req.body);
+        
+        // CRITICAL: Force username
+        std::string displayName = params.value("networkName", "default");
+        
+        // Create network for user
+        json result = networkMgr->createUserNetwork(ctx.userId, displayName);
+        res.set_content(result.dump(), "application/json");
+        
+        if (result["success"].get<bool>()) {
+            Rlogger->logUserAction(ctx.userId, "create_network", displayName, true);
+        }
+        
+    } catch (const json::exception& e) {
+        sendError(res, std::string("Invalid JSON: ") + e.what());
+    }
+}
+
+void APIRoutes::handleDeleteNetwork(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    
+    if (!ctx.is_auth) {
+        sendUnauthorized(res);
+        return;
+    }
+    
+    std::string networkID = req.matches[1];
+    
+    bool success = networkMgr->deleteUserNetwork(networkID, ctx.userId);
+    
+    json result;
+    if (success) {
+        result["success"] = true;
+        result["message"] = "Network deleted";
+        Rlogger->logUserAction(ctx.userId, "delete_network", networkID, true);
+    } else {
+        result["success"] = false;
+        result["error"] = "Failed to delete network or access denied";
+        Rlogger->logUserAction(ctx.userId, "delete_network", networkID, false);
+    }
+    
+    res.set_content(result.dump(), "application/json");
+}
+
+void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response& res) {
+    UserContext ctx = extractUserContext(req);
+    // Only admin can delete others, users can delete themselves
+    std::string targetUser = req.path_params.at("username");
+    
+    if (!ctx.is_auth || (!ctx.isAdmin && ctx.userId != targetUser)) {
+        res.status = 403;
+        res.set_content("{\"error\": \"Access denied\"}", "application/json");
+        return;
+    }
+
+    vmOps->deleteAllVMs(targetUser); 
+    
+    json result = userOps->deleteUser(targetUser);
+    
+    if (result["success"].get<bool>()) {
+        res.set_content(result.dump(), "application/json");
+    } else {
+        res.status = 400;
+        res.set_content(result.dump(), "application/json");
+    }
+}
+
 
 
 void APIRoutes::handleGetVMInfo(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -751,7 +531,7 @@ void APIRoutes::handleGetVMInfo(const httplib::Request& req, httplib::Response& 
 
 void APIRoutes::handleGetVMStatus(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -770,7 +550,7 @@ void APIRoutes::handleGetVMStatus(const httplib::Request& req, httplib::Response
 
 void APIRoutes::handleGetVMStats(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -788,148 +568,9 @@ void APIRoutes::handleGetVMStats(const httplib::Request& req, httplib::Response&
     res.set_content(result.dump(), "application/json");
 }
 
-void APIRoutes::handleStartVM(const httplib::Request& req, httplib::Response& res) {
-    std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
-
-    if (!checkVMAccess(name, userCtx)) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Access denied"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-
-    bool success = vmOps->startVM(name);
-    json result = {
-        {"success", success},
-        {"output", success ? "Domain started" : "Failed to start domain"}
-    };
-    
-    res.set_content(result.dump(), "application/json");
-}
-
-void APIRoutes::handleDeleteVM(const httplib::Request& req, httplib::Response& res) {
-    std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
-    
-    if (!checkVMAccess(name, userCtx)) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Access denied"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    // Get query parameter for disk removal
-    bool removeDisks = true;
-    if (req.has_param("removeDisks")) {
-        std::string removeDiskParam = req.get_param_value("removeDisks");
-        removeDisks = (removeDiskParam == "true" || removeDiskParam == "1");
-    }
-    
-    json result = vmOps->deleteVM(name, removeDisks);
-    
-    if (!result["success"].get<bool>()) {
-        res.status = 500;
-        
-        // Check if it's a "not found" error
-        if (result.contains("error")) {
-            std::string error = result["error"];
-            if (error.find("not found") != std::string::npos) {
-                res.status = 404;
-            }
-        }
-    }
-    
-    res.set_content(result.dump(2), "application/json");
-}
-
-void APIRoutes::handleDeployVM(const httplib::Request& req, httplib::Response& res) {    
-    // Parse JSON body
-    fprintf(stderr, "Received deploy request 1\n");
-    json body;
-    try {
-        body = json::parse(req.body);
-    } catch (const std::exception& e) {
-        std::cerr << "JSON parse error: " << e.what() << std::endl;
-        res.status = 400;
-        json error = {
-            {"success", false}, 
-            {"error", "Invalid JSON: " + std::string(e.what())}
-        };
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    
-        fprintf(stderr, "Received deploy request 2\n");
-
-    auto userCtx = getUserContext(req, userOps);
-    fprintf(stderr, "Received deploy request 3\n");
-
-    // Validate user context
-    if (userCtx.userId.empty()) {
-        res.status = 401;
-        json error = {{"success", false}, {"error", "User not authenticated"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    fprintf(stderr, "Received deploy request 4\n");
-
-  // Add owner info
-    body["owner"] = userCtx.userId;
-    body["ownerRole"] = userCtx.role;
-    
-    // Generate internal VM name: userid__hostname__timestamp
-
-    VMNameManager nameManager;
-    std::string userHostname = body["hostname"];
-    std::string internalName = nameManager.createVMName(userCtx.userId, userHostname);
-        fprintf(stderr, "Received deploy request 5\n");
-
-    body["hostname"] = internalName;
-    body["displayName"] = userHostname;  // Keep original for reference
-    
-
-    bool success = vmOps->deployVM(body);
-    
-    if (success) {
-        json result = {
-            {"success", true},
-            {"output", "VM deployment initiated successfully"},
-            {"vmName", internalName},
-            {"displayName", userHostname}
-        };
-        res.set_content(result.dump(), "application/json");
-    } else {
-        res.status = 500;
-        json error = {{"success", false}, {"error", "Failed to deploy VM"}};
-        res.set_content(error.dump(), "application/json");
-    }
-}
-
-
-void APIRoutes::handleShutdownVM(const httplib::Request& req, httplib::Response& res) {
-    std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
-    
-    if (!checkVMAccess(name, userCtx)) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Access denied"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-
-    bool success = vmOps->shutdownVM(name);
-    
-    json result = {
-        {"success", success},
-        {"output", success ? "Domain is shutting down" : "Failed to shutdown domain"}
-    };
-    
-    res.set_content(result.dump(), "application/json");
-}
-
 void APIRoutes::handleDestroyVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -949,7 +590,7 @@ void APIRoutes::handleDestroyVM(const httplib::Request& req, httplib::Response& 
 
 void APIRoutes::handleRebootVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -969,7 +610,7 @@ void APIRoutes::handleRebootVM(const httplib::Request& req, httplib::Response& r
 
 void APIRoutes::handlePauseVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -989,7 +630,7 @@ void APIRoutes::handlePauseVM(const httplib::Request& req, httplib::Response& re
 
 void APIRoutes::handleResumeVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1007,46 +648,10 @@ void APIRoutes::handleResumeVM(const httplib::Request& req, httplib::Response& r
     res.set_content(result.dump(), "application/json");
 }
 
-void APIRoutes::handleGetVNC(const httplib::Request& req, httplib::Response& res) {
-    std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
-    
-    if (!checkVMAccess(name, userCtx)) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Access denied"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    json result = vmOps->getVNCInfo(name);
-    res.set_content(result.dump(), "application/json");
-}
-
-
-void APIRoutes::handleGetIP(const httplib::Request& req, httplib::Response& res)
-{
-    std::string name = req.matches[1];
-
-    auto userCtx = getUserContext(req, userOps);
-    
-    if (!checkVMAccess(name, userCtx)) {
-        res.status = 403;
-        json error = {{"success", false}, {"error", "Access denied"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-
-    json result = vmOps->getIP(name);
-
-    if (!result["success"].get<bool>()) {
-        res.status = 404;
-    }
-
-    res.set_content(result.dump(), "application/json");
-}
 
 void APIRoutes::handleListSnapshots(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1066,7 +671,7 @@ void APIRoutes::handleListSnapshots(const httplib::Request& req, httplib::Respon
 
 void APIRoutes::handleCreateSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1108,7 +713,7 @@ void APIRoutes::handleCreateSnapshot(const httplib::Request& req, httplib::Respo
 void APIRoutes::handleRevertSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
     std::string snapName = req.matches[2];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1129,7 +734,7 @@ void APIRoutes::handleRevertSnapshot(const httplib::Request& req, httplib::Respo
 void APIRoutes::handleDeleteSnapshot(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
     std::string snapName = req.matches[2];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
 
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1149,7 +754,7 @@ void APIRoutes::handleDeleteSnapshot(const httplib::Request& req, httplib::Respo
 
 void APIRoutes::handleCloneVM(const httplib::Request& req, httplib::Response& res) {
     std::string name = req.matches[1];
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1195,7 +800,7 @@ void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response&
     result["success"] = false;
     std::string name = req.matches[1];
 
-     auto userCtx = getUserContext(req, userOps);
+     auto userCtx = extractUserContext(req);
     
     if (!checkVMAccess(name, userCtx)) {
         res.status = 403;
@@ -1254,7 +859,7 @@ void APIRoutes::handleSystemInfo(const httplib::Request& req, httplib::Response&
 
 
 void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& res) {
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!userCtx.isAdmin) {
         res.status = 403;
@@ -1268,26 +873,6 @@ void APIRoutes::handleListUsers(const httplib::Request& req, httplib::Response& 
     res.set_content(result.dump(), "application/json");
 }
 
-
-void APIRoutes::handleCreateUser(const httplib::Request& req, httplib::Response& res) {   
-    json body;
-    try {
-        body = json::parse(req.body);
-    } catch (...) {
-        res.status = 400;
-        json error = {{"success", false}, {"error", "Invalid JSON"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-    
-    json result = userOps->createUser(body);
-    
-    if (!result["success"].get<bool>()) {
-        res.status = 400;
-    }
-    
-    res.set_content(result.dump(), "application/json");
-}    
 
 void APIRoutes::handleUpdateUser(const httplib::Request& req, httplib::Response& res){
 
@@ -1311,31 +896,8 @@ void APIRoutes::handleUpdateUser(const httplib::Request& req, httplib::Response&
     res.set_content(result.dump(), "application/json");
 }
 
-void APIRoutes::handleDeleteUser(const httplib::Request& req, httplib::Response& res){
-     json body;
-    try {
-        body = json::parse(req.body);
-    } catch (...) {
-        res.status = 400;
-        json error = {{"success", false}, {"error", "Invalid JSON"}};
-        res.set_content(error.dump(), "application/json");
-        return;
-    }
-
-    std::string username = req.matches[1];
-
-    auto re = vmOps->deleteAllVMs(username);
-    json result = userOps->deleteUser(username);
-    
-    if (!result["success"].get<bool>() && re) {
-        res.status = 400;
-    }
-    
-    res.set_content(result.dump(), "application/json");
-
-}
 void APIRoutes::handleGetUserUsage(const httplib::Request& req, httplib::Response& res){
-    auto userCtx = getUserContext(req, userOps);
+    auto userCtx = extractUserContext(req);
     
     if (!userCtx.is_auth) {
         res.status = 401;

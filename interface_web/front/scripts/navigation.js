@@ -56,27 +56,33 @@ function updateActiveNavItem(activeItem) {
 function loadViewData(viewName) {
     switch(viewName) {
         case 'dashboard':
-            loadDashboardData();
+            window.vmController?.loadVMs();
             break;
         case 'vms':
-            loadVMs();
+            window.vmController?.loadVMs();
             break;
         case 'paas':
-            refreshApps();  // This should show deployed apps
-            break;
-        case 'paas-catalog':
-            if (window.renderCatalogApps) {
-                setTimeout(() => renderCatalogApps(), 100); // Small delay to ensure DOM is ready
-            }
+            window.paasController?.loadDeployedApps();
             break;
         case 'users':
-            loadUsersTable();
+            if (authService.isAdmin()) {
+                window.UserManagement?.loadUsers();
+            }
             break;
         case 'billing':
-            updateBilling();
+            window.BillingDashboard?.init();
+            break;
+        case 'monitoring':
+            window.monitoringDashboard?.init();
+            break;
+        case 'networks':
+            window.NetworkService?.loadMyNetworks();
+            break;
+        case 'swarm':
+            window.loadSwarmClusters?.();
             break;
         case 'system':
-            loadSystemInfo();
+            window.loadSystemInfo?.();
             break;
     }
 }
@@ -123,20 +129,6 @@ async function loadDashboardData() {
         }
     } catch (error) {
         console.error('Error loading dashboard data:', error);
-    }
-}
-
-// Close Details Panel
-function closeDetailsPanel() {
-    const panel = document.getElementById('vm-details-panel');
-    if (panel) {
-        panel.classList.remove('open');
-    }
-    
-    // Clear stats interval if exists
-    if (window.statsInterval) {
-        clearInterval(window.statsInterval);
-        window.statsInterval = null;
     }
 }
 

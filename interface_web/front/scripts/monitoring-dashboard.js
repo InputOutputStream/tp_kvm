@@ -8,12 +8,24 @@ class MonitoringDashboard {
         this.charts = {};
         this.updateInterval = null;
         this.monitoredVMs = new Set();
+        this.initialized = false;
+
     }
 
     async init() {
+        if (this.initialized) return;
         await this.loadMonitoringData();
         this.initCharts();
         this.startAutoRefresh();
+
+        // Connect to VM selection
+        window.stateManager?.subscribe('currentVM', (vmName) => {
+            if (vmName) {
+                this.monitorVM(vmName);
+            }
+        });
+        
+        this.initialized = true;
     }
 
     async loadMonitoringData() {

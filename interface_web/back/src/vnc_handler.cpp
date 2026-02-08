@@ -5,6 +5,8 @@
 #include <regex>
 #include <fstream>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <map>
 
 VNCHandler::VNCHandler(virConnectPtr connection) : conn(connection) {
     // Load VNC configuration
@@ -33,8 +35,39 @@ void VNCHandler::setDefaultConfig() {
         {"novncPort", 6080},
         {"vncBasePort", 5900},
         {"vncPasswordFile", "/var/lib/thoth-cloud/vnc_passwords.json"},
+        {"vncProxyFile", "/var/lib/thoth-cloud/vnc_proxies.json"},
         {"enabled", true}
     };
+}
+
+void VNCHandler::saveProxyInfo(const std::string& vmName, int proxyPort, const std::string& target) {
+    json proxies;
+    std::string proxyFile = config.value("vncProxyFile", "/var/lib/thoth-cloud/vnc_proxies.json");
+    
+    // Load existing proxies
+    std::ifstream inFile(proxyFile);
+    if (inFile.is_open()) {
+        try {
+            inFile >> proxies;
+            inFile.close();
+        } catch (const std::exception& e) {
+            proxies = json::object();
+        }
+    }
+    
+    // Add new proxy info
+    proxies[vmName] = {
+        {"proxyPort", proxyPort},
+        {"target", target},
+        {"created", std::time(nullptr)}
+    };
+    
+    // Save
+    std::ofstream outFile(proxyFile);
+    if (outFile.is_open()) {
+        outFile << proxies.dump(2);
+        outFile.close();
+    }
 }
 
 json VNCHandler::getVNCInfo(const std::string& vmName) {
@@ -71,22 +104,20 @@ json VNCHandler::getVNCInfo(const std::string& vmName) {
     std::string xml(xmlDesc);
     free(xmlDesc);
     
-    // Extract VNC port from XML
-    // <graphics type='vnc' port='5900' autoport='yes' listen='127.0.0.1'>
+    // Extract VNC port and listen address
     std::regex vncRegex("<graphics type='vnc'[^>]*port='(\\d+)'");
+    std::regex listenRegex("listen='([^']+)'");
     std::smatch match;
     
     int vncPort = -1;
-    std::string vncHost = "127.0.0.1";
+    std::string listenAddress = "127.0.0.1";
     
     if (std::regex_search(xml, match, vncRegex)) {
         vncPort = std::stoi(match[1].str());
     }
     
-    // Extract listen address if present
-    std::regex listenRegex("listen='([^']+)'");
     if (std::regex_search(xml, match, listenRegex)) {
-        vncHost = match[1].str();
+        listenAddress = match[1].str();
     }
     
     virDomainFree(domain);
@@ -96,12 +127,37 @@ json VNCHandler::getVNCInfo(const std::string& vmName) {
         return result;
     }
     
-    // Build noVNC URL
+    // Get actual host IP (not localhost for remote access)
+    std::string hostPublicIP = getHostPublicIP(conn);
+    if (hostPublicIP.empty()) {
+        // Fallback: Use connection hostname
+        char* hostname = virConnectGetHostname(conn);
+        hostPublicIP = hostname ? std::string(hostname) : "localhost";
+        if (hostname) free(hostname);
+    }
+    
+    // Determine if we need a proxy
+    bool needsProxy = (listenAddress == "127.0.0.1" || listenAddress == "localhost");
+    
+    if (needsProxy) {
+        // Start SSH tunnel or websocket proxy
+        int proxyPort = setupVNCProxy(vmName, listenAddress, vncPort);
+        if (proxyPort > 0) {
+            vncPort = proxyPort;
+            listenAddress = "127.0.0.1"; // Proxy runs locally
+            result["proxy"] = true;
+        }
+    }
+    
+    // Build URLs for different access methods
     std::stringstream novncUrl;
     novncUrl << "http://" << config["novncHost"].get<std::string>() 
              << ":" << config["novncPort"].get<int>()
-             << "/vnc.html?host=" << config["novncHost"].get<std::string>()
+             << "/vnc.html?host=" << hostPublicIP
              << "&port=" << vncPort;
+    
+    // Add direct VNC access URL (for external VNC clients)
+    result["directVNC"] = hostPublicIP + ":" + std::to_string(vncPort);
     
     // Check if VM has VNC password
     std::string vncPassword = getVNCPassword(vmName);
@@ -114,11 +170,81 @@ json VNCHandler::getVNCInfo(const std::string& vmName) {
     
     result["success"] = true;
     result["vncPort"] = vncPort;
-    result["vncHost"] = vncHost;
+    result["vncHost"] = listenAddress;
     result["novncUrl"] = novncUrl.str();
     result["vmName"] = vmName;
+    result["accessMethods"] = {
+        {"direct", result["directVNC"]},
+        {"web", result["novncUrl"]},
+        {"host", hostPublicIP},
+        {"needsProxy", needsProxy}
+    };
     
     return result;
+}
+
+int VNCHandler::setupVNCProxy(const std::string& vmName, 
+                              const std::string& targetHost, 
+                              int targetPort) {
+    RemoteExec::RemoteExecutor remoteExec(conn);
+    
+    // Find available port for proxy
+    int proxyPort = findAvailablePort(5900, 6100);
+    if (proxyPort == -1) {
+        std::cerr << "No available ports for VNC proxy" << std::endl;
+        return -1;
+    }
+    
+    // Check if websockify is available
+    if (!remoteExec.commandExists("websockify")) {
+        std::cerr << "websockify is not installed on the target host" << std::endl;
+        return -1;
+    }
+    
+    // Create SSH tunnel or websocket proxy
+    std::stringstream cmd;
+    cmd << "websockify -D --web /usr/share/novnc " 
+        << proxyPort << " " << targetHost << ":" << targetPort 
+        << " > /dev/null 2>&1 &";
+    
+    auto result = remoteExec.execute(cmd.str());
+    
+    if (result.success()) {
+        // Save proxy info for cleanup
+        saveProxyInfo(vmName, proxyPort, targetHost + ":" + std::to_string(targetPort));
+        return proxyPort;
+    }
+    
+    std::cerr << "Failed to start VNC proxy: " << result.output << std::endl;
+    return -1;
+}
+
+std::string VNCHandler::getHostPublicIP(virConnectPtr conn) {
+    RemoteExec::RemoteExecutor remoteExec(conn);
+    
+    // Try multiple methods to get public IP
+    std::vector<std::string> commands = {
+        "curl -s --max-time 2 ifconfig.me",
+        "curl -s --max-time 2 icanhazip.com",
+        "curl -s --max-time 2 ipinfo.io/ip",
+        "hostname -I | awk '{print $1}'"
+    };
+    
+    for (const auto& cmd : commands) {
+        auto result = remoteExec.execute(cmd);
+        if (result.success() && !result.output.empty()) {
+            std::string ip = result.output;
+            // Remove whitespace
+            ip.erase(std::remove_if(ip.begin(), ip.end(), ::isspace), ip.end());
+            
+            // Validate IP format
+            if (std::regex_match(ip, std::regex(R"(^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$)"))) {
+                return ip;
+            }
+        }
+    }
+    
+    return "";
 }
 
 json VNCHandler::enableVNC(const std::string& vmName, const std::string& password) {
@@ -209,8 +335,11 @@ json VNCHandler::enableVNC(const std::string& vmName, const std::string& passwor
     
     // Restart VM if it was running
     if (wasRunning) {
-        virDomainCreate(newDomain);
-        result["restarted"] = true;
+        if (virDomainCreate(newDomain) < 0) {
+            result["warning"] = "VNC enabled but failed to restart VM";
+        } else {
+            result["restarted"] = true;
+        }
     }
     
     virDomainFree(domain);
@@ -246,6 +375,10 @@ void VNCHandler::setVNCPassword(const std::string& vmName, const std::string& pa
     json passwords;
     std::string passwordFile = config["vncPasswordFile"].get<std::string>();
     
+    // Ensure directory exists
+    std::string dir = "/var/lib/thoth-cloud";
+    mkdir(dir.c_str(), 0755);
+    
     // Load existing passwords
     std::ifstream inFile(passwordFile);
     if (inFile.is_open()) {
@@ -273,10 +406,11 @@ json VNCHandler::getNoVNCStatus() {
     
     // Check if noVNC service is running
     RemoteExec::RemoteExecutor remoteExec(conn);
-    auto serviceCheck = remoteExec.execute("systemctl is-active novnc");
+    auto serviceCheck = remoteExec.execute("systemctl is-active novnc 2>/dev/null || echo 'inactive'");
     
     result["novncRunning"] = (serviceCheck.success() && 
-                              serviceCheck.output.find("active") != std::string::npos);
+                              serviceCheck.output.find("active") != std::string::npos &&
+                              serviceCheck.output.find("inactive") == std::string::npos);
     result["novncHost"] = config["novncHost"];
     result["novncPort"] = config["novncPort"];
     result["enabled"] = config["enabled"];
@@ -296,13 +430,29 @@ json VNCHandler::createVNCProxy(const std::string& vmName, int vncPort) {
     // Find an available proxy port (60xx range for user VNC proxies)
     int proxyPort = 6000 + (vncPort - 5900);
     
+    // Check if port is already in use
+    std::stringstream checkCmd;
+    checkCmd << "netstat -tuln | grep -q ':" << proxyPort << " ' && echo 'in_use' || echo 'free'";
+    auto checkResult = remoteExec.execute(checkCmd.str());
+    
+    if (checkResult.output.find("in_use") != std::string::npos) {
+        // Find alternative port
+        proxyPort = findAvailablePort(6000, 6200);
+        if (proxyPort == -1) {
+            result["error"] = "No available ports for VNC proxy";
+            return result;
+        }
+    }
+    
     // Start websockify for this specific VM
     std::stringstream cmd;
-    cmd << "websockify -D " << proxyPort << " localhost:" << vncPort;
+    cmd << "websockify -D " << proxyPort << " localhost:" << vncPort 
+        << " > /dev/null 2>&1 &";
     
     auto execResult = remoteExec.execute(cmd.str());
     
     if (execResult.success()) {
+        saveProxyInfo(vmName, proxyPort, "localhost:" + std::to_string(vncPort));
         result["success"] = true;
         result["proxyPort"] = proxyPort;
         result["url"] = "ws://localhost:" + std::to_string(proxyPort);

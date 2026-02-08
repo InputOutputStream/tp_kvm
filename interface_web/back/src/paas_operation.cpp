@@ -1,6 +1,7 @@
 #include "../include/paas_operations.hpp"
 #include "../include/utils.hpp"
 #include "../include/remote_executor.hpp"
+#include "../include/validation.hpp"
 #include <chrono>
 #include <thread>
 #include <iostream>
@@ -10,22 +11,78 @@
 PaaSOperations::PaaSOperations(virConnectPtr connection, RemoteExec::RemoteExecutor *remoteExec, HostManager *hostMgr)
  : conn(connection), remoteExecutor(remoteExec), hostManager(hostMgr) {}
 
+
+std::string trim(const std::string& str)
+{
+    const size_t first = str.find_first_not_of(' ');
+    if (std::string::npos == first)
+    {
+        return str;
+    }
+    const size_t last = str.find_last_not_of(' ');
+    return str.substr(first, (last - first + 1));
+}
+
+
+bool PaaSOperations::validateDockerImage(const std::string& imageName) {
+    // Only allow alphanumeric, dots, slashes, colons, hyphens
+    static const std::regex valid_pattern(R"(^[a-zA-Z0-9._/:@-]+$)");
+    if (!std::regex_match(imageName, valid_pattern)) {
+        return false;
+    }
+    
+    // Prevent command injection
+    if (imageName.find(";") != std::string::npos ||
+        imageName.find("&&") != std::string::npos ||
+        imageName.find("|") != std::string::npos ||
+        imageName.find("`") != std::string::npos ||
+        imageName.find("$") != std::string::npos) {
+        return false;
+    }
+    
+    return true;
+}
+
+
 bool PaaSOperations::dockerImageExists(const std::string& imageName) {
-    std::string cmd = "sudo docker images -q " + imageName + " 2>/dev/null";
+    std::lock_guard<std::mutex> lock(imageCacheMutex);
+    
+    auto it = imageCache.find(imageName);
+    if (it != imageCache.end()) {
+        // Cache valid for 5 minutes
+        if (time(nullptr) - it->second < 300) {
+            return true;
+        }
+    }
+    
+    // Check and update cache
+    std::string cmd = "docker images -q '" + imageName + "' 2>/dev/null";
     auto result = remoteExecutor->execute(cmd);
-    // Fixed: Image exists if command succeeded AND output is not empty
-    return result.success() && !result.output.empty();
+    
+    bool exists = result.success() && !result.output.empty();
+    if (exists) {
+        imageCache[imageName] = time(nullptr);
+    }
+    
+    return exists;
 }
 
 bool PaaSOperations::pullDockerImage(const std::string& imageName) {
+    if (!validateDockerImage(imageName)) {
+        std::cerr << "Invalid docker image name: " << imageName << std::endl;
+        return false;
+    }
+
     std::cout << "Pulling Docker image: " << imageName << std::endl;
-    std::string cmd = "sudo docker pull " + imageName + " 2>&1";
+    std::string cmd = "docker pull '" + imageName + "' 2>&1";
     auto result = remoteExecutor->execute(cmd);
     
-    // Check if pull was successful
-    return result.output.find("Downloaded") != std::string::npos || 
-           result.output.find("up to date") != std::string::npos ||
-           dockerImageExists(imageName);
+    if (!result.success()) {
+        std::cerr << "Failed to pull image: " << result.output << std::endl;
+        return false;
+    }
+    
+    return true;
 }
 
 json PaaSOperations::selectPaaSHost(const json& appConfig) {
@@ -36,37 +93,29 @@ json PaaSOperations::selectPaaSHost(const json& appConfig) {
         result["error"] = "Host manager not available";
         return result;
     }
+
+    // Requirements
+    int reqMem = appConfig.value("memory", 512);
+    int reqCpu = appConfig.value("cpu", 1);
     
-    // Default resource requirements for PaaS applications
-    int memory = appConfig.value("memory", 1024); // 1GB default
-    int cpu = appConfig.value("cpu", 1);         // 1 vCPU default
-    long long disk = appConfig.value("disk", 1024 * 1024 * 1024); // 1GB default
+    // Use HostManager to find best fit
+    std::string bestHostId = hostManager->findBestHost(reqMem, reqCpu, 10);
     
-    // Check resource availability
-    json availability = hostManager->checkResourceAvailability(memory, cpu, disk);
-    
-    if (!availability["available"].get<bool>()) {
-        result["error"] = "No suitable host found for PaaS deployment";
-        result["details"] = availability;
+    if (bestHostId.empty()) {
+        result["error"] = "No suitable host found for PaaS container";
         return result;
     }
-    
-    // Use host selection strategy
-    std::string selectedHost = hostManager->findBestHost(memory, cpu, disk);
-    
-    if (selectedHost.empty()) {
-        result["error"] = "Could not select optimal host";
-        return result;
+
+    // Verify Docker is running on selected host
+    virConnectPtr hostConn = hostManager->getConnection(bestHostId);
+    RemoteExec::RemoteExecutor exec(hostConn);
+    if (!exec.execute("docker info").success()) {
+         result["error"] = "Selected host does not have Docker Engine ready";
+         return result;
     }
     
     result["success"] = true;
-    result["host"] = selectedHost;
-    result["resources"] = {
-        {"memory", memory},
-        {"cpu", cpu},
-        {"disk", disk}
-    };
-    
+    result["hostId"] = bestHostId;
     return result;
 }
 
@@ -323,16 +372,14 @@ json PaaSOperations::deployApplicationEnhanced(const json& appConfig) {
 
 
 
-
 json PaaSOperations::listApplications() {
     json result;
     result["success"] = false;
     
-    // Get running containers with label for PaaS apps
-    std::string cmd = "sudo docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1";
+    // Get running containers with label for isolation
+    std::string cmd = "sudo docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}' 2>&1";
     auto execResult = remoteExecutor->execute(cmd);
     
-    // Check if command execution failed
     if (!execResult.success()) {
         result["error"] = "Failed to execute docker ps command";
         return result;
@@ -340,10 +387,9 @@ json PaaSOperations::listApplications() {
     
     std::string output = execResult.output;
     
-    // Check for actual Docker errors (not just the word "error" in output)
-    if (output.find("Cannot connect to the Docker daemon") != std::string::npos ||
-        output.find("permission denied") != std::string::npos) {
-        result["error"] = "Docker daemon not accessible: " + output;
+    // Check for Docker daemon errors
+    if (output.find("Cannot connect to the Docker daemon") != std::string::npos) {
+        result["error"] = "Docker daemon not accessible. Ensure Docker is running and user has permissions.";
         return result;
     }
     
@@ -352,39 +398,72 @@ json PaaSOperations::listApplications() {
     std::string line;
     
     while (std::getline(stream, line)) {
-        // Skip empty lines and warning messages
-        if (line.empty() || 
-            line.find("Warning:") != std::string::npos ||
-            line.find("sudo:") != std::string::npos) {
+        if (line.empty() || line.find("Warning:") != std::string::npos) {
             continue;
         }
         
         // Parse tab-delimited output
         std::istringstream lineStream(line);
-        std::string name, status, ports;
+        std::string name, status, ports, labels;
         
         if (!std::getline(lineStream, name, '\t')) continue;
-        std::getline(lineStream, status, '\t');  // May be empty
-        std::getline(lineStream, ports, '\t');   // May be empty
+        std::getline(lineStream, status, '\t');
+        std::getline(lineStream, ports, '\t');
+        std::getline(lineStream, labels, '\t');
         
         // Trim whitespace
-        name.erase(0, name.find_first_not_of(" \t\r\n"));
-        name.erase(name.find_last_not_of(" \t\r\n") + 1);
+        auto trim = [](std::string& s) {
+            s.erase(0, s.find_first_not_of(" \t\r\n"));
+            s.erase(s.find_last_not_of(" \t\r\n") + 1);
+        };
         
-        if (!name.empty()) {
-            json app = {
-                {"name", name},
-                {"status", status},
-                {"ports", ports},
-                {"running", status.find("Up") != std::string::npos}
-            };
-            
-            apps.push_back(app);
+        trim(name);
+        trim(status);
+        trim(ports);
+        
+        // Extract owner from container name or labels
+        std::string owner = "unknown";
+        if (name.find('_') != std::string::npos) {
+            size_t pos = name.find('_');
+            owner = name.substr(0, pos);
         }
+        
+        // Check if container is part of a compose project
+        bool isCompose = (name.find("_") != std::string::npos && 
+                         std::count(name.begin(), name.end(), '_') >= 2);
+        
+        json app = {
+            {"name", name},
+            {"displayName", name},  // Will be parsed for user display
+            {"status", status},
+            {"ports", ports},
+            {"owner", owner},
+            {"running", status.find("Up") != std::string::npos},
+            {"isCompose", isCompose},
+            {"labels", labels}
+        };
+        
+        apps.push_back(app);
     }
     
     result["success"] = true;
     result["applications"] = apps;
+    result["count"] = apps.size();
+    
+    // Also list Docker networks for context
+    auto networksResult = remoteExecutor->execute("docker network ls --format '{{.Name}}'");
+    if (networksResult.success()) {
+        std::vector<std::string> networks;
+        std::istringstream netStream(networksResult.output);
+        std::string netName;
+        while (std::getline(netStream, netName)) {
+            trim(netName);
+            if (!netName.empty()) {
+                networks.push_back(netName);
+            }
+        }
+        result["networks"] = networks;
+    }
     
     return result;
 }

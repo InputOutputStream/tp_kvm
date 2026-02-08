@@ -13,9 +13,6 @@
 #include <sys/stat.h>
 #include <libvirt/virterror.h>
 
-VMOperations::VMOperations(virConnectPtr connection, HostManager *hostMgr, NetworkManager *netMgr)
- : conn(connection), hostManager(hostMgr), networkManager(netMgr){}
-
 std::string VMOperations::getStateString(int state) {
     const char* states[] = {"no state", "running", "blocked", "paused", 
                            "shutdown", "shut off", "crashed", "pmsuspended"};
@@ -25,71 +22,6 @@ std::string VMOperations::getStateString(int state) {
     return "unknown";
 }
 
-
-json VMOperations::listUserVMs(const std::string& userId) {
-    json result;
-    result["success"] = false;
-    
-    if (!conn) {
-        result["error"] = "Not connected to libvirt";
-        return result;
-    }
-    
-    virDomainPtr* domains;
-    int numDomains = virConnectListAllDomains(conn, &domains, 0);
-    
-    if (numDomains < 0) {
-        result["error"] = "Error listing VMs";
-        return result;
-    }
-    
-    VMNameManager nameManager;
-    json vms = json::array();
-    
-    for (int i = 0; i < numDomains; i++) {
-        const char* name = virDomainGetName(domains[i]);
-        
-        // Check if VM belongs to user
-        if (nameManager.isOwner(name, userId)) {
-            virDomainInfo info;
-            virDomainGetInfo(domains[i], &info);
-            
-            int id = virDomainGetID(domains[i]);
-            std::string state = getStateString(info.state);
-            bool isRunning = (info.state == VIR_DOMAIN_RUNNING);
-            
-            // Parse name to get display name
-            auto nameInfo = nameManager.parseVMName(name);
-            std::string displayName = nameInfo.valid ? nameInfo.vmName : name;
-            
-            json vm = {
-                {"id", id},
-                {"name", name},  // Internal name
-                {"displayName", displayName},  // User-friendly name
-                {"state", state},
-                {"running", isRunning},
-                {"owner", userId},
-                {"stats", nullptr}
-            };
-            
-            if (isRunning) {
-                vm["stats"] = getVMStatsInternal(domains[i], name);
-            }
-            
-            vms.push_back(vm);
-        }
-        
-        virDomainFree(domains[i]);
-    }
-    
-    free(domains);
-    
-    result["success"] = true;
-    result["vms"] = vms;
-    result["count"] = vms.size();
-    
-    return result;
-}
 
 // Update listAllVMs to include owner info
 json VMOperations::listAllVMs() {
@@ -178,68 +110,74 @@ json VMOperations::getVMStatsInternal(virDomainPtr domain, const std::string& vm
     
     virDomainInfo info;
     if (virDomainGetInfo(domain, &info) < 0) {
+        stats["error"] = "Failed to get domain info";
         return stats;
     }
     
-    // CPU usage
-    double cpuUsage = 0.0;
-    unsigned long long cpuTime = info.cpuTime;
+    stats["cpuCount"] = info.nrVirtCpu;
+    stats["memory"] = info.memory / 1024; // MB
     
-    if (statsCache.find(vmName) != statsCache.end()) {
-        CPUCache cached = statsCache[vmName];
-        long long timeDiff = getCurrentTimeMs() - cached.timestamp;
-        unsigned long long cpuDiff = cpuTime - cached.cpuTime;
-        if (timeDiff > 0) {
-            cpuUsage = ((double)cpuDiff / (timeDiff * 1000000.0)) * 100.0;
+    // CPU usage calculation with mutex
+    virDomainInfo newInfo;
+    if (virDomainGetInfo(domain, &newInfo) == 0) {
+        long long currentTime = getCurrentTimeMs();
+        unsigned long long currentCpuTime = newInfo.cpuTime;
+        
+        std::lock_guard<std::mutex> lock(statsCacheMutex);  // LOCK HERE
+        
+        auto it = statsCache.find(vmName);
+        if (it != statsCache.end()) {
+            long long timeDiff = currentTime - it->second.timestamp;
+            unsigned long long cpuDiff = currentCpuTime - it->second.cpuTime;
+            
+            if (timeDiff > 0) {
+                double cpuUsage = (cpuDiff * 100.0) / (timeDiff * 1000000.0 * info.nrVirtCpu);
+                stats["cpuUsage"] = cpuUsage;
+            }
         }
+        
+        statsCache[vmName] = {currentCpuTime, currentTime};
     }
-    statsCache[vmName] = {cpuTime, getCurrentTimeMs()};
-    
-    stats["cpu"] = cpuUsage;
-    
-    // Memory
-    stats["memory"] = {
-        {"used", info.memory},
-        {"max", info.maxMem},
-        {"percent", info.maxMem > 0 ? (info.memory * 100.0 / info.maxMem) : 0}
-    };
-    
-    // Disk stats
-    virDomainBlockStatsStruct blockStats;
-    long long diskRead = 0, diskWrite = 0;
-    if (virDomainBlockStats(domain, "vda", &blockStats, sizeof(blockStats)) == 0) {
-        diskRead = blockStats.rd_bytes;
-        diskWrite = blockStats.wr_bytes;
-    }
-    
-    stats["disk"] = {
-        {"read", diskRead},
-        {"write", diskWrite},
-        {"readMB", diskRead / 1024.0 / 1024.0},
-        {"writeMB", diskWrite / 1024.0 / 1024.0}
-    };
-    
-    // Network stats - FIXED: dynamically get interface name
-    virDomainInterfaceStatsStruct netStats;
-    long long netRx = 0, netTx = 0;
-    
-    std::string interfaceName = getFirstNetworkInterface(domain);
-    if (!interfaceName.empty()) {
-        if (virDomainInterfaceStats(domain, interfaceName.c_str(), &netStats, sizeof(netStats)) == 0) {
-            netRx = netStats.rx_bytes;
-            netTx = netStats.tx_bytes;
-        }
-    }
-    // If interface name couldn't be determined, network stats remain 0
-    
-    stats["network"] = {
-        {"rx", netRx},
-        {"tx", netTx},
-        {"rxMB", netRx / 1024.0 / 1024.0},
-        {"txMB", netTx / 1024.0 / 1024.0}
-    };
     
     return stats;
+}
+
+std::vector<std::string> VMOperations::getDiskPaths(virDomainPtr domain) {
+    std::vector<std::string> paths;
+    
+    char* xmlDesc = virDomainGetXMLDesc(domain, 0);
+    if (!xmlDesc) {
+        std::cerr << "Failed to get domain XML" << std::endl;
+        return paths;
+    }
+    
+    std::string xml(xmlDesc);
+    free(xmlDesc);  // CRITICAL: Free immediately after copying
+    
+    // Extract disk paths from XML
+    std::regex diskRegex("<source [^>]*file='([^']+)'");
+    std::smatch match;
+    std::string::const_iterator searchStart(xml.cbegin());
+    
+    while (std::regex_search(searchStart, xml.cend(), match, diskRegex)) {
+        paths.push_back(match[1].str());
+        searchStart = match.suffix().first;
+    }
+    
+    return paths;
+}
+
+bool VMOperations::validateXML(const std::string& xml) {
+    // Basic XML validation
+    if (xml.empty()) return false;
+    if (xml.find("<domain") == std::string::npos) return false;
+    if (xml.find("</domain>") == std::string::npos) return false;
+    
+    // Check for suspicious content
+    if (xml.find("<script") != std::string::npos) return false;
+    if (xml.find("javascript:") != std::string::npos) return false;
+    
+    return true;
 }
 
 json VMOperations::getVMInfo(const std::string& name) {
@@ -340,29 +278,6 @@ json VMOperations::getVMStatus(const std::string& name) {
     return result;
 }
 
-bool VMOperations::startVM(const std::string& name) {
-    if (!conn) return false;
-    
-    virDomainPtr domain = virDomainLookupByName(conn, name.c_str());
-    if (!domain) return false;
-    
-    int result = virDomainCreate(domain);
-    virDomainFree(domain);
-    
-    return result >= 0;
-}
-
-bool VMOperations::shutdownVM(const std::string& name) {
-    if (!conn) return false;
-    
-    virDomainPtr domain = virDomainLookupByName(conn, name.c_str());
-    if (!domain) return false;
-    
-    int result = virDomainShutdown(domain);
-    virDomainFree(domain);
-    
-    return result >= 0;
-}
 
 // ==========================================
 // RESOURCE MANAGEMENT
@@ -967,106 +882,6 @@ void VMOperations::printConfiguration(const json& vmParams) {
 // MAIN DEPLOYMENT METHOD
 // ==========================================
 
-bool VMOperations::deployVM(const json& vmParams) {
-    try {
-    
-        // Select optimal host
-        auto hostSelection = selectOptimalHost(vmParams);
-        if (!hostSelection.connection) {
-            return false;
-        }
-        
-        // Update connection if host was selected
-        if (!hostSelection.hostname.empty()) {
-            conn = hostSelection.connection;
-        }
-        
-        // Create remote executor
-        RemoteExec::RemoteExecutor remoteExec(conn);
-        fprintf(stdout, "📡 Target Host: %s\n\n", remoteExec.getHostInfo().c_str());
-        
-        // Validation phase
-        if (!validateConnection()) return false;
-        if (!validateInputParameters(vmParams)) return false;
-        
-        std::string hostname = vmParams["hostname"];
-        std::string baseImageId = vmParams.value("baseImage", "");
-
-        if (!validateVMNameAvailability(hostname)) return false;
-        if (!validateRemoteDirectories(remoteExec)) return false;
-        if (!validateRemoteTools(remoteExec)) return false;
-        if (!validateBaseImage(remoteExec, baseImageId)) return false;
-        if (!validateDiskSpace(remoteExec, vmParams["disk"])) return false;
-        if (!validateNetwork()) return false;
-        
-        // Print configuration
-        printConfiguration(vmParams);
-        
-        // Create cloud-init configuration
-        auto cloudInitConfig = createCloudInitConfig(vmParams);
-
-        // Get base image ID from parameters (default to first available if not specified)
-     
-        // If no image specified, try to auto-select
-        if (baseImageId.empty()) {
-            BaseImageManager imageManager(&remoteExec);
-            auto imagesList = imageManager.listImages();
-            
-            if (imagesList["count"].get<int>() == 0) {
-                fprintf(stderr, "❌ No base images available on target host\n");
-                return false;
-            }
-            
-            // Use first available image
-            baseImageId = imagesList["images"][0]["id"];
-            fprintf(stdout, "ℹ️  No base image specified, using: %s\n", 
-                    imagesList["images"][0]["displayName"].get<std::string>().c_str());
-        }
-        
-        // Handle password hashing if needed
-        if (vmParams.value("authMethod", "password") == "password" && 
-            vmParams.contains("password") && !vmParams["password"].get<std::string>().empty()) {
-            
-            std::string hashedPassword = hashPassword(remoteExec, vmParams["password"]);
-            if (hashedPassword.empty()) {
-                fprintf(stderr, "   ❌ Failed to generate password hash on target host\n");
-                return false;
-            }
-            
-            // Insert password into user-data
-            size_t pos = cloudInitConfig.userData.find("    shell: /bin/bash\n");
-            if (pos != std::string::npos) {
-                std::string passwordSection = "    passwd: " + hashedPassword + "\n" +
-                                             "    lock_passwd: false\n";
-                cloudInitConfig.userData.insert(pos + 24, passwordSection);
-            }
-        }
-        
-        // Deployment phase
-        if (!writeCloudInitFiles(remoteExec, hostname, cloudInitConfig)) return false;
-        if (!createCloudInitISO(remoteExec, hostname)) return false;
-        if (!copyBaseImage(remoteExec, hostname, baseImageId)) return false;
-        if (!resizeDisk(remoteExec, hostname, vmParams["disk"])) return false;
-        
-        // Create and start VM
-        fprintf(stdout, "Step 5/7: Creating VM definition...\n");
-        std::string xml = generateDomainXML(vmParams);
-        fprintf(stdout, "   ✅ VM definition created\n");
-        
-        virDomainPtr domain = defineVM(xml);
-        if (!domain) return false;
-        
-        bool started = startVM(domain);
-        virDomainFree(domain);
-        
-        return started;
-        
-    } catch (const std::exception& e) {
-        fprintf(stderr, "\n❌ Exception during deployment: %s\n", e.what());
-        return false;
-    }
-}
-
 bool VMOperations::destroyVM(const std::string& name) {
     if (!conn) return false;
     
@@ -1114,73 +929,3 @@ bool VMOperations::resumeVM(const std::string& name) {
     
     return result >= 0;
 }
-
-json VMOperations::getVNCInfo(const std::string& name) {
-    json result;
-    result["success"] = false;
-    
-    if (!conn) {
-        result["error"] = "Not connected to libvirt";
-        return result;
-    }
-    
-    virDomainPtr domain = virDomainLookupByName(conn, name.c_str());
-    if (!domain) {
-        result["error"] = "VM not found";
-        return result;
-    }
-    
-    // Check if VM is running
-    virDomainInfo info;
-    if (virDomainGetInfo(domain, &info) < 0 || info.state != VIR_DOMAIN_RUNNING) {
-        result["error"] = "VM is not running";
-        virDomainFree(domain);
-        return result;
-    }
-    
-    // Get VNC port from domain XML
-    char* xmlDesc = virDomainGetXMLDesc(domain, 0);
-    if (!xmlDesc) {
-        result["error"] = "Failed to get VM configuration";
-        virDomainFree(domain);
-        return result;
-    }
-    
-    std::string xml(xmlDesc);
-    free(xmlDesc);
-    
-    // Parse VNC port from XML
-    // Look for: <graphics type='vnc' port='5900' .../>
-    std::regex vncRegex("<graphics type='vnc' port='([0-9]+)'");
-    std::smatch match;
-    
-    int vncPort = -1;
-    if (std::regex_search(xml, match, vncRegex)) {
-        vncPort = std::stoi(match[1].str());
-    }
-    
-    virDomainFree(domain);
-    
-    if (vncPort == -1) {
-        result["error"] = "VNC not configured for this VM";
-        return result;
-    }
-    
-    // Get hostname
-    char* hostname = virConnectGetHostname(conn);
-    std::string host = hostname ? std::string(hostname) : "localhost";
-    if (hostname) free(hostname);
-    
-    result["success"] = true;
-    result["vnc"] = {
-        {"host", host},
-        {"port", vncPort},
-        {"display", vncPort - 5900},
-        {"websocketUrl", "ws://" + host + ":6080"},
-        {"token", ""},  
-        {"password", ""}  
-    };
-    
-    return result;
-}
-
