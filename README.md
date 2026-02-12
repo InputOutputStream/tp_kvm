@@ -37,7 +37,7 @@ For a single-host development setup:
 
 ```bash
 # 1. Clone repository
-https://github.com/InputOutputStream/tp_kvm/
+https://github.com/InputOutputStream/thoth-cloud/
 cd thoth-cloud
 
 # 2. Run automated setup (Ubuntu 22.04+)
