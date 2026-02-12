@@ -198,36 +198,20 @@ class VMController {
     // Show/Hide VM Details
     // ==========================================
     
-    async showVMDetails(vmName) {
+
+    showVMDetails(vmName) {
         const panel = document.getElementById('vm-details-panel');
-        const panelTitle = document.getElementById('vm-panel-title');
+        if (!panel) return;
+
+        // Reset panel content or show loading state here if needed
+        document.getElementById('vm-panel-title').textContent = `VM: ${vmName}`;
         
-        if (panel) {
-            panel.classList.add('open');
-        }
+        // CSS Transition method: Add the class
+        panel.classList.add('open'); 
         
-        if (panelTitle) {
-            const vm = window.stateManager.state.vms.find(v => v.name === vmName);
-            const displayName = vm?.displayName || vmName;
-            panelTitle.textContent = `VM: ${displayName}`;
-        }
-        
-        // Load VM info and snapshots
-        await Promise.all([
-            this.loadVMInfo(vmName),
-            this.loadSnapshots(vmName)
-        ]);
-        
-        // Show stats section if VM is running
-        try {
-            const data = await window.api.getVMDetails(vmName);
-            const statsSection = document.getElementById('vm-stats');
-            if (statsSection) {
-                statsSection.style.display = data.running ? 'grid' : 'none';
-            }
-        } catch (error) {
-            console.error('Error checking VM status:', error);
-        }
+        // Load the data
+        this.updateVMStats(vmName);
+        this.loadVMInfo(vmName);
     }
 
     hideVMDetails() {
@@ -235,12 +219,10 @@ class VMController {
         if (panel) {
             panel.classList.remove('open');
         }
-        
-        // Clear selection
-        document.querySelectorAll('.vm-card').forEach(card => {
-            card.classList.remove('selected');
-        });
     }
+
+ 
+
 
     // ==========================================
     // Load VM Info
@@ -579,8 +561,13 @@ class VMController {
     }
 
     closeDetailsPanel() {
+    if (window.stateManager) {
         window.stateManager.clearCurrentVM();
+    } else {
+        // Fallback if state manager fails
+        document.getElementById('vm-details-panel')?.classList.remove('open');
     }
+};
 }
 
 // Create global instance

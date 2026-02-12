@@ -240,7 +240,7 @@ class UnifiedAPIClient {
     // ==========================================
 
     async getPaasApplications() {
-        return this.get('/paas/applications');
+        return this.get('/paas/apps');  
     }
 
     async deployPaasApplication(appConfig) {
@@ -248,27 +248,27 @@ class UnifiedAPIClient {
     }
 
     async getPaasApplicationDetails(appId) {
-        return this.get(`/paas/applications/${appId}`);
+        return this.get(`/paas/apps/${appId}`);
     }
 
     async getPaasApplicationStats(appId) {
-        return this.get(`/paas/applications/${appId}/stats`);
+        return this.get(`/paas/apps/${appId}/stats`);
     }
 
     async getPaasApplicationLogs(appId, lines = 100) {
-        return this.get(`/paas/applications/${appId}/logs?lines=${lines}`);
+        return this.get(`/paas/apps/${appId}/logs?lines=${lines}`);
     }
 
     async stopPaasApplication(appId) {
-        return this.post(`/paas/applications/${appId}/stop`);
+        return this.post(`/paas/apps/${appId}/stop`);
     }
 
     async startPaasApplication(appId) {
-        return this.post(`/paas/applications/${appId}/start`);
+        return this.post(`/paas/apps/${appId}/start`);
     }
 
     async deletePaasApplication(appId) {
-        return this.delete(`/paas/applications/${appId}`);
+        return this.delete(`/paas/apps/${appId}`);
     }
 
     async getDatabaseCredentials(dbType, appName, username) {

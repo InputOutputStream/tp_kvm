@@ -70,12 +70,13 @@ int main() {
     
     ResourceMetadataStore g_metadataStore;
     
+    std::cerr << " I am here "<< std::endl;
+
     NetworkProxyService g_proxyService(
         &remoteExec,
         hostList["hosts"][0]["id"]   
     );   
 
-    std::cerr << " I am here "<< std::endl;
 
     // VMOperations needs everything initialized before it
     VMOperations vmOps(primaryConn, &hostManager, &networkMgr, 

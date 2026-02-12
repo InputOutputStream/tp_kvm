@@ -1,5 +1,5 @@
 // ==========================================
-// PAAS DEPLOYMENT WIZARD
+// PAAS DEPLOYMENT WIZARD - FIXED VERSION
 // ==========================================
 
 class PaaSDeploymentWizard {
@@ -187,145 +187,260 @@ class PaaSDeploymentWizard {
                 <div class="form-group" style="margin-top: 20px;">
                     <label>Host Selection Strategy</label>
                     <select id="host-strategy">
-                        <option value="auto">Auto-select (Recommended)</option>
-                        <option value="manual">Manual selection</option>
+                        <option value="auto" selected>Automatic (Best Fit)</option>
+                        <option value="manual">Manual Selection (Above)</option>
                     </select>
+                    <small>Automatic selection balances load across available hosts</small>
                 </div>
             `;
         } catch (error) {
-            return `<p class="error-text">Error loading hosts: ${error.message}</p>`;
+            return `<p>Error loading hosts: ${error.message}</p>`;
         }
     }
 
     async renderStep4() {
         const app = window.PAAS_APPS_EXTENDED.find(a => a.id === this.deploymentConfig.app);
+        const appName = this.deploymentConfig.appName || 'N/A';
+        const cpu = this.deploymentConfig.cpu || 'N/A';
+        const memory = this.deploymentConfig.memory || 'N/A';
+        const storage = this.deploymentConfig.storage || 'N/A';
+        const hostStrategy = this.deploymentConfig.hostStrategy || 'auto';
+        const hostId = this.deploymentConfig.hostId;
         
         return `
             <h3>📋 Review Deployment</h3>
-            <div class="review-summary">
-                <div class="review-section">
-                    <h4>Application</h4>
-                    <div class="review-item">
-                        <strong>Name:</strong> ${document.getElementById('app-name')?.value || 'N/A'}
-                    </div>
-                    <div class="review-item">
-                        <strong>Type:</strong> ${app.name}
-                    </div>
-                    <div class="review-item">
-                        <strong>Image:</strong> ${app.image}
-                    </div>
-                </div>
+            <div class="review-panel">
+                <h4>Application Details</h4>
+                <table class="review-table">
+                    <tr>
+                        <td><strong>Type:</strong></td>
+                        <td>${app.name}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Name:</strong></td>
+                        <td>${appName}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Image:</strong></td>
+                        <td>${app.image}</td>
+                    </tr>
+                    ${app.database ? `
+                    <tr>
+                        <td><strong>Database:</strong></td>
+                        <td>${app.database} ${this.deploymentConfig.dbEnabled ? '(Enabled)' : '(Disabled)'}</td>
+                    </tr>
+                    ` : ''}
+                </table>
                 
-                <div class="review-section">
-                    <h4>Resources</h4>
-                    <div class="review-item">
-                        <strong>CPU:</strong> ${document.getElementById('app-cpu')?.value || 1} vCPU
-                    </div>
-                    <div class="review-item">
-                        <strong>Memory:</strong> ${document.getElementById('app-memory')?.value || 1024} MB
-                    </div>
-                    <div class="review-item">
-                        <strong>Storage:</strong> ${document.getElementById('app-storage')?.value || 10} GB
-                    </div>
-                </div>
+                <h4>Resources</h4>
+                <table class="review-table">
+                    <tr>
+                        <td><strong>CPU:</strong></td>
+                        <td>${cpu} vCPU</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Memory:</strong></td>
+                        <td>${memory} MB</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Storage:</strong></td>
+                        <td>${storage} GB</td>
+                    </tr>
+                </table>
                 
-                <div class="review-section">
-                    <h4>Database</h4>
-                    <div class="review-item">
-                        <strong>Type:</strong> ${app.database || 'None'}
-                    </div>
-                    <div class="review-item">
-                        <strong>Status:</strong> ${document.getElementById('enable-database')?.checked ? 'Enabled' : 'Disabled'}
-                    </div>
-                </div>
-                
-                <div class="review-section">
-                    <h4>Cost Estimate</h4>
-                    <div class="review-item">
-                        <strong>Monthly:</strong> ${app.price} FCFA
-                    </div>
-                    <div class="review-item">
-                        <strong>Resources:</strong> 500 FCFA
-                    </div>
-                    <div class="review-item total">
-                        <strong>Total:</strong> ${app.price + 500} FCFA/month
-                    </div>
-                </div>
-            </div>
-            
-            <div class="warning-banner" style="margin-top: 20px;">
-                <span class="warning-icon">⚠️</span>
-                <p>Deployment will take 2-5 minutes. Your application will be available at a unique URL.</p>
+                <h4>Deployment Target</h4>
+                <table class="review-table">
+                    <tr>
+                        <td><strong>Strategy:</strong></td>
+                        <td>${hostStrategy === 'auto' ? 'Automatic Selection' : 'Manual Selection'}</td>
+                    </tr>
+                    ${hostId ? `
+                    <tr>
+                        <td><strong>Host:</strong></td>
+                        <td>${hostId}</td>
+                    </tr>
+                    ` : ''}
+                </table>
             </div>
         `;
     }
 
     renderWizardButtons() {
-        let buttons = '';
-        
-        if (this.currentStep > 1) {
-            buttons += `<button class="btn btn-secondary" onclick="paasWizard.previousStep()">← Previous</button>`;
-        }
-        
-        if (this.currentStep < 4) {
-            buttons += `<button class="btn btn-primary" onclick="paasWizard.nextStep()">Next →</button>`;
+        if (this.currentStep === 1) {
+            return `
+                <button class="btn btn-secondary" onclick="closeModal('paas-deployment-wizard')">Cancel</button>
+                <button class="btn btn-primary" onclick="paasWizard.nextStep()" ${!this.deploymentConfig.app ? 'disabled' : ''}>
+                    Next →
+                </button>
+            `;
+        } else if (this.currentStep === 4) {
+            return `
+                <button class="btn btn-secondary" onclick="paasWizard.previousStep()">← Back</button>
+                <button class="btn btn-success" onclick="paasWizard.deployApplication()">
+                    🚀 Deploy Now
+                </button>
+            `;
         } else {
-            buttons += `<button class="btn btn-success" onclick="paasWizard.deployApplication()">🚀 Deploy Now</button>`;
+            return `
+                <button class="btn btn-secondary" onclick="paasWizard.previousStep()">← Back</button>
+                <button class="btn btn-primary" onclick="paasWizard.nextStep()">Next →</button>
+            `;
         }
-        
-        return buttons;
     }
 
     selectApp(appId) {
         this.deploymentConfig.app = appId;
-        this.nextStep();
+        this.currentStep = 2;
+        this.refreshWizard();
     }
 
-    nextStep() {
+    async nextStep() {
+        // Store values from current step before moving
+        if (this.currentStep === 2) {
+            this.deploymentConfig.appName = document.getElementById('app-name')?.value;
+            this.deploymentConfig.cpu = document.getElementById('app-cpu')?.value;
+            this.deploymentConfig.memory = document.getElementById('app-memory')?.value;
+            this.deploymentConfig.storage = document.getElementById('app-storage')?.value;
+            this.deploymentConfig.dbEnabled = document.getElementById('enable-database')?.checked;
+        } else if (this.currentStep === 3) {
+            this.deploymentConfig.hostId = document.querySelector('input[name="deployment-host"]:checked')?.value;
+            this.deploymentConfig.hostStrategy = document.getElementById('host-strategy')?.value;
+        }
+        
         if (this.currentStep < 4) {
             this.currentStep++;
-            this.showDeploymentWizard();
+            await this.refreshWizard();
         }
     }
 
     previousStep() {
         if (this.currentStep > 1) {
             this.currentStep--;
-            this.showDeploymentWizard();
+            this.refreshWizard();
         }
+    }
+
+    async refreshWizard() {
+        const modal = document.getElementById('paas-deployment-wizard');
+        if (!modal) return;
+        
+        const wizardContent = modal.querySelector('.wizard-content');
+        const modalFooter = modal.querySelector('.modal-footer');
+        
+        if (wizardContent) {
+            wizardContent.innerHTML = await this.renderStep(this.currentStep);
+        }
+        
+        if (modalFooter) {
+            modalFooter.innerHTML = this.renderWizardButtons();
+        }
+        
+        // Update progress indicators
+        const steps = modal.querySelectorAll('.wizard-step');
+        steps.forEach((step, index) => {
+            if (index + 1 <= this.currentStep) {
+                step.classList.add('active');
+            } else {
+                step.classList.remove('active');
+            }
+        });
     }
 
     async deployApplication() {
         try {
             showToast('Starting deployment...', 'info');
             
-            // Gather all configuration
+            // Get app details
             const app = window.PAAS_APPS_EXTENDED.find(a => a.id === this.deploymentConfig.app);
-            const appName = document.getElementById('app-name')?.value;
-            const cpu = document.getElementById('app-cpu')?.value;
-            const memory = document.getElementById('app-memory')?.value;
-            const storage = document.getElementById('app-storage')?.value;
-            const hostId = document.querySelector('input[name="deployment-host"]:checked')?.value;
+            if (!app) {
+                showToast('❌ Invalid application selected', 'error');
+                return;
+            }
             
+            // Validate and get username
+            const username = window.authService?.currentUser?.username;
+            if (!username) {
+                showToast('❌ User not authenticated. Please refresh and log in again.', 'error');
+                console.error('Auth state:', {
+                    authService: window.authService,
+                    currentUser: window.authService?.currentUser
+                });
+                return;
+            }
+            
+            // Use stored config values
+            const appName = this.deploymentConfig.appName;
+            const cpu = this.deploymentConfig.cpu;
+            const memory = this.deploymentConfig.memory;
+            const storage = this.deploymentConfig.storage;
+            const hostId = this.deploymentConfig.hostId;
+            
+            // Validate required fields
+            if (!appName || !cpu || !memory || !storage) {
+                showToast('❌ Missing configuration. Please go back and fill all fields.', 'error');
+                return;
+            }
+            
+            // Build full app ID
+            const fullAppId = `${username}_${appName}`;
+            
+            // Build deployment config matching backend expectations
             const deploymentConfig = {
-                id: `${authService.currentUser.username}_${appName}`,
-                name: appName,
+                id: fullAppId,
+                name: fullAppId,
                 dockerImage: app.image,
-                ports: app.ports,
-                resources: {
-                    cpu: parseFloat(cpu),
-                    memory: parseInt(memory),
-                    storage: parseInt(storage)
-                },
-                database: app.database ? {
-                    type: app.database,
-                    enabled: document.getElementById('enable-database')?.checked || false
-                } : null,
-                environment: this.gatherEnvironmentVariables(),
-                hostId: hostId || 'auto'
+                ports: Array.isArray(app.ports) ? app.ports : [],
+                // Backend expects these at top level, not nested
+                cpu: parseFloat(cpu) || 1,
+                memory: parseInt(memory) || 1024,
+                storage: parseInt(storage) || 10,
+                environment: {},
+                hostId: (hostId && hostId.trim()) ? hostId : "auto"
             };
             
-            // Call deployment API
+            // Only add database if enabled and valid
+            if (app.database && 
+                typeof app.database === 'string' && 
+                app.database.trim() !== '' &&
+                this.deploymentConfig.dbEnabled) {
+                
+                deploymentConfig.database = {
+                    type: app.database.trim(),
+                    enabled: true
+                };
+            }
+            
+            // Debug logging
+            console.log('=== DEPLOYMENT DEBUG ===');
+            console.log('Username:', username);
+            console.log('App:', app.id);
+            console.log('Full config:', JSON.stringify(deploymentConfig, null, 2));
+            console.log('=======================');
+            
+            // Validate no null values
+            const hasNullValues = Object.entries(deploymentConfig).some(([key, value]) => {
+                if (value === null || value === undefined) {
+                    console.error(`NULL VALUE FOUND: ${key}`);
+                    return true;
+                }
+                if (typeof value === 'object' && value !== null) {
+                    return Object.entries(value).some(([k, v]) => {
+                        if (v === null || v === undefined) {
+                            console.error(`NULL VALUE FOUND: ${key}.${k}`);
+                            return true;
+                        }
+                        return false;
+                    });
+                }
+                return false;
+            });
+            
+            if (hasNullValues) {
+                showToast('❌ Configuration contains invalid values', 'error');
+                return;
+            }
+            
+            // Deploy
             const result = await this.api.deployPaasApplication(deploymentConfig);
             
             if (result.success) {
@@ -333,11 +448,14 @@ class PaaSDeploymentWizard {
                 closeModal('paas-deployment-wizard');
                 
                 // Show deployment progress
-                this.showDeploymentProgress(result.deploymentId);
+                if (result.deploymentId) {
+                    this.showDeploymentProgress(result.deploymentId);
+                }
             } else {
                 showToast(`❌ ${result.error}`, 'error');
             }
         } catch (error) {
+            console.error('Deployment error:', error);
             showToast(`❌ Deployment failed: ${error.message}`, 'error');
         }
     }
@@ -347,10 +465,10 @@ class PaaSDeploymentWizard {
         const rows = document.querySelectorAll('.env-var-row');
         
         rows.forEach(row => {
-            const key = row.querySelector('.env-key').value;
-            const value = row.querySelector('.env-value').value;
-            if (key && value) {
-                envVars[key] = value;
+            const key = row.querySelector('.env-key')?.value;
+            const value = row.querySelector('.env-value')?.value;
+            if (key && key.trim() && value) {
+                envVars[key.trim()] = value;
             }
         });
         
@@ -405,7 +523,6 @@ class PaaSDeploymentWizard {
         
         document.body.appendChild(modal);
         
-        // Simulate progress updates (in real app, this would be WebSocket/SSE)
         this.simulateDeploymentProgress(deploymentId);
     }
 
@@ -423,20 +540,17 @@ class PaaSDeploymentWizard {
         
         updates.forEach((update, index) => {
             setTimeout(() => {
-                // Update step
                 steps.forEach((step, i) => {
                     step.classList.toggle('active', i <= update.step);
                     step.classList.toggle('complete', i < update.step);
                 });
                 
-                // Update log
                 log.innerHTML = update.message + '<br>' + log.innerHTML;
                 
-                // If final step, update button
                 if (index === updates.length - 1) {
                     const footer = modal.querySelector('.modal-footer');
                     footer.innerHTML = `
-                        <button class="btn btn-success" onclick="closeModal('deployment-progress-modal'); window.paasManager.refreshApps()">
+                        <button class="btn btn-success" onclick="closeModal('deployment-progress-modal'); window.paasController?.loadDeployedApps()">
                             ✅ View Application
                         </button>
                     `;
